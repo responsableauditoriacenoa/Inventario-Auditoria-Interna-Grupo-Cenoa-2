@@ -325,7 +325,7 @@ export default function App() {
   const canAudit = currentUser?.role === 'Auditor' || currentUser?.role === 'admin';
   const canManageInventory = canAudit;
   const canValidate = currentUser?.role === 'Auditor';
-  const canDepositJustify = currentUser?.role === 'Deposito' || currentUser?.role === 'admin';
+  const canDepositJustify = currentUser?.role === 'Deposito';
   const importedSampleStats = useMemo(() => {
     if (importedRows.length === 0) {
       return { a: 80, b: 15, c: 5, total: 0 };
@@ -371,6 +371,21 @@ export default function App() {
         return updated;
       }),
     );
+  };
+
+  const saveValidationStatus = (inventoryId: string, articleId: string, status: '' | 'SI' | 'NO') => {
+    const basePatch: Partial<Article> = {
+      validatedStatus: status,
+      validatedBy: currentUser?.id ?? '',
+      validatedAt: new Date().toISOString(),
+    };
+
+    if (status !== 'SI') {
+      basePatch.adjustmentType = '';
+      basePatch.adjustmentQuantity = 0;
+    }
+
+    saveArticlePatch(inventoryId, articleId, basePatch);
   };
 
   const stats = useMemo(() => {
@@ -891,6 +906,13 @@ export default function App() {
               </div>
             </div>
 
+            {canDepositJustify && (
+              <p className="text-xs text-zinc-500">Perfil Depósito: completá únicamente la justificación de cada diferencia.</p>
+            )}
+            {canValidate && (
+              <p className="text-xs text-zinc-500">Perfil Auditor: validá cada justificación y definí Tipo de Ajuste cuando corresponda (SI).</p>
+            )}
+
             <div className="grid grid-cols-1 gap-4">
               {differenceRows.length === 0 && <Card><p className="text-sm text-emerald-700 font-medium">Sin diferencias para justificar en este inventario.</p></Card>}
               {differenceRows.map((item) => (
@@ -925,6 +947,16 @@ export default function App() {
                       <div className="flex items-center gap-4">
                         <select
                           className="text-xs font-bold bg-white border border-zinc-200 rounded-lg px-3 py-1.5 focus:outline-none"
+                          value={item.validatedStatus ?? ''}
+                          onChange={(e) => saveValidationStatus(justInventoryId, item.id, e.target.value as '' | 'SI' | 'NO')}
+                          disabled={!canValidate}
+                        >
+                          <option value="">¿Validada?</option>
+                          <option value="SI">SI</option>
+                          <option value="NO">NO</option>
+                        </select>
+                        <select
+                          className="text-xs font-bold bg-white border border-zinc-200 rounded-lg px-3 py-1.5 focus:outline-none"
                           value={item.adjustmentType ?? ''}
                           onChange={(e) => saveArticlePatch(justInventoryId, item.id, { adjustmentType: e.target.value as Article['adjustmentType'] })}
                           disabled={!canValidate || item.validatedStatus !== 'SI'}
@@ -943,23 +975,6 @@ export default function App() {
                             disabled={!canValidate || item.validatedStatus !== 'SI'}
                           />
                         )}
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="checkbox"
-                            id={`val-${item.id}`}
-                            className="w-4 h-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900"
-                            checked={item.validatedStatus === 'SI'}
-                            disabled={!canValidate}
-                            onChange={(e) =>
-                              saveArticlePatch(justInventoryId, item.id, {
-                                validatedStatus: e.target.checked ? 'SI' : 'NO',
-                                validatedBy: currentUser?.id ?? '',
-                                validatedAt: new Date().toISOString(),
-                              })
-                            }
-                          />
-                          <label htmlFor={`val-${item.id}`} className="text-xs font-medium text-zinc-600">Validado por Auditor</label>
-                        </div>
                       </div>
                       <span className="text-xs font-semibold text-zinc-500">Dif: {item.difference ?? 0}</span>
                     </div>
