@@ -291,6 +291,8 @@ export default function App() {
   const [concessionaire, setConcessionaire] = useState('Autolux');
   const [branch, setBranch] = useState(CONCESIONARIAS.Autolux[0]);
   const [reportScope, setReportScope] = useState<'open' | 'closed'>('open');
+  const [closedFilterConcessionaire, setClosedFilterConcessionaire] = useState<'Todas' | string>('Todas');
+  const [closedFilterBranch, setClosedFilterBranch] = useState<'Todas' | string>('Todas');
   const [auditInventoryId, setAuditInventoryId] = useState('');
   const [justInventoryId, setJustInventoryId] = useState('');
   const [reportInventoryId, setReportInventoryId] = useState('');
@@ -340,7 +342,22 @@ export default function App() {
 
   const openInventories = useMemo(() => inventories.filter((inv) => inv.status === 'Abierto'), [inventories]);
   const closedInventories = useMemo(() => inventories.filter((inv) => inv.status === 'Cerrado'), [inventories]);
-  const reportScopeInventories = reportScope === 'open' ? openInventories : closedInventories;
+  const closedBranchesForSelectedConcessionaire = useMemo(() => {
+    const source = closedFilterConcessionaire === 'Todas'
+      ? closedInventories
+      : closedInventories.filter((inv) => inv.concessionaire === closedFilterConcessionaire);
+    return Array.from(new Set(source.map((inv) => inv.branch))).sort();
+  }, [closedFilterConcessionaire, closedInventories]);
+
+  const filteredClosedInventories = useMemo(() => {
+    return closedInventories.filter((inv) => {
+      const concessionaireMatch = closedFilterConcessionaire === 'Todas' || inv.concessionaire === closedFilterConcessionaire;
+      const branchMatch = closedFilterBranch === 'Todas' || inv.branch === closedFilterBranch;
+      return concessionaireMatch && branchMatch;
+    });
+  }, [closedFilterBranch, closedFilterConcessionaire, closedInventories]);
+
+  const reportScopeInventories = reportScope === 'open' ? openInventories : filteredClosedInventories;
   const canAudit = currentUser?.role === 'Auditor' || currentUser?.role === 'admin';
   const canManageInventory = canAudit;
   const canValidate = canAudit;
@@ -379,6 +396,27 @@ export default function App() {
       setReportScope('open');
     }
   }, [closedInventories.length, openInventories.length, reportScope]);
+
+  useEffect(() => {
+    if (reportScope !== 'closed') {
+      return;
+    }
+    if (closedFilterConcessionaire !== 'Todas') {
+      const exists = closedInventories.some((inv) => inv.concessionaire === closedFilterConcessionaire);
+      if (!exists) {
+        setClosedFilterConcessionaire('Todas');
+      }
+    }
+  }, [closedFilterConcessionaire, closedInventories, reportScope]);
+
+  useEffect(() => {
+    if (closedFilterBranch === 'Todas') {
+      return;
+    }
+    if (!closedBranchesForSelectedConcessionaire.includes(closedFilterBranch)) {
+      setClosedFilterBranch('Todas');
+    }
+  }, [closedBranchesForSelectedConcessionaire, closedFilterBranch]);
 
   useEffect(() => {
     if (reportScopeInventories.length === 0) {
@@ -1056,6 +1094,43 @@ export default function App() {
                 </select>
               </div>
             </div>
+
+            {reportScope === 'closed' && (
+              <Card>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-zinc-400 uppercase">Concesionaria</label>
+                    <select
+                      value={closedFilterConcessionaire}
+                      onChange={(e) => {
+                        const next = e.target.value;
+                        setClosedFilterConcessionaire(next);
+                        setClosedFilterBranch('Todas');
+                      }}
+                      className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2 text-sm focus:outline-none"
+                    >
+                      <option value="Todas">Todas</option>
+                      {Array.from(new Set(closedInventories.map((inv) => inv.concessionaire))).sort().map((item) => (
+                        <option key={item} value={item}>{item}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-zinc-400 uppercase">Sucursal</label>
+                    <select
+                      value={closedFilterBranch}
+                      onChange={(e) => setClosedFilterBranch(e.target.value)}
+                      className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2 text-sm focus:outline-none"
+                    >
+                      <option value="Todas">Todas</option>
+                      {closedBranchesForSelectedConcessionaire.map((item) => (
+                        <option key={item} value={item}>{item}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </Card>
+            )}
 
             {reportInventory && reportScope === 'closed' && (
               <Card>
