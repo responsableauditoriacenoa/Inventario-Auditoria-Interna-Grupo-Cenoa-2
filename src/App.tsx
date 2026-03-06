@@ -290,6 +290,7 @@ export default function App() {
   const [importError, setImportError] = useState('');
   const [concessionaire, setConcessionaire] = useState('Autolux');
   const [branch, setBranch] = useState(CONCESIONARIAS.Autolux[0]);
+  const [reportScope, setReportScope] = useState<'open' | 'closed'>('open');
   const [auditInventoryId, setAuditInventoryId] = useState('');
   const [justInventoryId, setJustInventoryId] = useState('');
   const [reportInventoryId, setReportInventoryId] = useState('');
@@ -338,6 +339,8 @@ export default function App() {
   }, [currentUser]);
 
   const openInventories = useMemo(() => inventories.filter((inv) => inv.status === 'Abierto'), [inventories]);
+  const closedInventories = useMemo(() => inventories.filter((inv) => inv.status === 'Cerrado'), [inventories]);
+  const reportScopeInventories = reportScope === 'open' ? openInventories : closedInventories;
   const canAudit = currentUser?.role === 'Auditor' || currentUser?.role === 'admin';
   const canManageInventory = canAudit;
   const canValidate = canAudit;
@@ -366,6 +369,27 @@ export default function App() {
       setReportInventoryId(openInventories[0].id);
     }
   }, [auditInventoryId, justInventoryId, openInventories, reportInventoryId]);
+
+  useEffect(() => {
+    if (reportScope === 'open' && openInventories.length === 0 && closedInventories.length > 0) {
+      setReportScope('closed');
+      return;
+    }
+    if (reportScope === 'closed' && closedInventories.length === 0 && openInventories.length > 0) {
+      setReportScope('open');
+    }
+  }, [closedInventories.length, openInventories.length, reportScope]);
+
+  useEffect(() => {
+    if (reportScopeInventories.length === 0) {
+      setReportInventoryId('');
+      return;
+    }
+    const exists = reportScopeInventories.some((inv) => inv.id === reportInventoryId);
+    if (!exists) {
+      setReportInventoryId(reportScopeInventories[0].id);
+    }
+  }, [reportInventoryId, reportScopeInventories]);
 
   const updateInventoryArticles = (inventoryId: string, updater: (articles: Article[]) => Article[]) => {
     setInventories((prev) => prev.map((inv) => (inv.id === inventoryId ? { ...inv, articles: updater(inv.articles) } : inv)));
@@ -558,7 +582,7 @@ export default function App() {
 
   const auditInventory = openInventories.find((inv) => inv.id === auditInventoryId);
   const justInventory = openInventories.find((inv) => inv.id === justInventoryId);
-  const reportInventory = openInventories.find((inv) => inv.id === reportInventoryId);
+  const reportInventory = reportScopeInventories.find((inv) => inv.id === reportInventoryId);
   const reportResults = useMemo(() => calculateResults(reportInventory?.articles ?? []), [reportInventory]);
 
   const closeInventory = (inventoryId: string) => {
@@ -1004,23 +1028,48 @@ export default function App() {
         if (!canManageInventory) {
           return <Card><p className="text-sm text-zinc-500">Solo Auditores o admin pueden cerrar y reportar inventarios.</p></Card>;
         }
-        if (openInventories.length === 0) {
-          return <Card><p className="text-sm text-zinc-500">No hay inventarios abiertos para cierre y reporte.</p></Card>;
+        if (openInventories.length === 0 && closedInventories.length === 0) {
+          return <Card><p className="text-sm text-zinc-500">No hay inventarios disponibles para visualizar reportes.</p></Card>;
         }
         return (
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-bold text-zinc-900">Cierre + Reporte</h2>
-              <select
-                value={reportInventoryId}
-                onChange={(e) => setReportInventoryId(e.target.value)}
-                className="px-3 py-2 bg-white border border-zinc-200 rounded-lg text-xs font-semibold"
-              >
-                {openInventories.map((inv) => (
-                  <option key={inv.id} value={inv.id}>{inv.id}</option>
-                ))}
-              </select>
+              <div className="flex items-center gap-2">
+                <select
+                  value={reportScope}
+                  onChange={(e) => setReportScope(e.target.value as 'open' | 'closed')}
+                  className="px-3 py-2 bg-white border border-zinc-200 rounded-lg text-xs font-semibold"
+                >
+                  <option value="open">Inventarios Abiertos</option>
+                  <option value="closed">Inventarios Cerrados</option>
+                </select>
+                <select
+                  value={reportInventoryId}
+                  onChange={(e) => setReportInventoryId(e.target.value)}
+                  className="px-3 py-2 bg-white border border-zinc-200 rounded-lg text-xs font-semibold"
+                  disabled={reportScopeInventories.length === 0}
+                >
+                  {reportScopeInventories.map((inv) => (
+                    <option key={inv.id} value={inv.id}>{inv.id}</option>
+                  ))}
+                </select>
+              </div>
             </div>
+
+            {reportInventory && reportScope === 'closed' && (
+              <Card>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                  <p><span className="font-semibold">Estado:</span> Cerrado</p>
+                  <p><span className="font-semibold">Fecha de cierre:</span> {reportInventory.closureDate || '-'}</p>
+                  <p><span className="font-semibold">Usuario cierre:</span> {reportInventory.closureUser || '-'}</p>
+                </div>
+              </Card>
+            )}
+
+            {!reportInventory && (
+              <Card><p className="text-sm text-zinc-500">No hay inventarios en el estado seleccionado.</p></Card>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
               <StatCard title="Muestra" value={reportResults.cantidadMuestra} icon={Package} />
@@ -1083,14 +1132,16 @@ export default function App() {
               </Card>
             )}
 
-            <div className="flex justify-end">
-              <button
-                onClick={() => closeInventory(reportInventoryId)}
-                className="px-6 py-2 bg-zinc-900 text-white rounded-lg text-sm font-bold shadow-lg shadow-zinc-900/10 hover:bg-zinc-800 transition-all"
-              >
-                Cerrar Inventario
-              </button>
-            </div>
+            {reportScope === 'open' && reportInventory && (
+              <div className="flex justify-end">
+                <button
+                  onClick={() => closeInventory(reportInventoryId)}
+                  className="px-6 py-2 bg-zinc-900 text-white rounded-lg text-sm font-bold shadow-lg shadow-zinc-900/10 hover:bg-zinc-800 transition-all"
+                >
+                  Cerrar Inventario
+                </button>
+              </div>
+            )}
           </div>
         );
       default:
