@@ -11,7 +11,9 @@ export interface Article {
   physicalCount?: number;
   difference?: number;
   justification?: string;
-  isValidated?: boolean;
+  validatedStatus?: '' | 'SI' | 'NO';
+  validatedBy?: string;
+  validatedAt?: string;
   adjustmentType?: 'Ajuste' | 'Canje' | 'Sin Ajuste' | '';
   adjustmentQuantity?: number;
 }

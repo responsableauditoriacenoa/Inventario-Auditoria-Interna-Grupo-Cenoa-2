@@ -1,56 +1,63 @@
-import React, { useState, useMemo, useRef } from 'react';
-import { 
-  LayoutDashboard, 
-  Package, 
-  ClipboardCheck, 
-  MessageSquareQuote, 
-  FileText, 
-  LogOut, 
-  Plus, 
-  Search,
-  TrendingUp,
+import React, { useEffect, useMemo, useState } from 'react';
+import {
   AlertTriangle,
+  ArrowDownRight,
+  ArrowUpRight,
   CheckCircle2,
   ChevronRight,
-  ArrowUpRight,
-  ArrowDownRight,
-  BarChart3,
-  Sparkles,
+  ClipboardCheck,
   Download,
-  Filter,
-  MoreVertical
+  FileText,
+  LayoutDashboard,
+  LogOut,
+  MessageSquareQuote,
+  Package,
+  Plus,
+  Search,
+  Sparkles,
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
-import { 
-  BarChart, 
-  Bar, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  ResponsiveContainer, 
-  PieChart, 
-  Pie, 
-  Cell,
-  AreaChart,
-  Area
-} from 'recharts';
+import { AnimatePresence, motion } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { Inventory, Article, Category, User } from './types';
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI } from '@google/genai';
 
-// Utility for tailwind classes
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-// Mock Data
+const STORAGE_KEY = 'cenoa-inventories-v1';
+
 const MOCK_USER: User = {
   id: 'diego_guantay',
   name: 'Diego Guantay',
-  role: 'Auditor'
+  role: 'Auditor',
 };
+
+const CONCESIONARIAS: Record<string, string[]> = {
+  Autolux: ['Ax Jujuy', 'Ax Salta', 'Ax Tartagal', 'Ax Lajitas', 'Ax Taller Movil'],
+  Autosol: ['As Jujuy', 'As Salta', 'As Tartagal', 'As Taller Express', 'As Taller Movil'],
+  Ciel: ['Ac Jujuy'],
+  Portico: ['Las Lomas', 'Brown'],
+};
+
+const BASE_ARTICLES: Omit<Article, 'id' | 'category'>[] = [
+  { article: 'FIL-001', location: 'EST-A1', description: 'Filtro de Aceite Hilux', stock: 50, cost: 1500 },
+  { article: 'PAS-002', location: 'EST-B2', description: 'Pastillas de Freno Corolla', stock: 20, cost: 4500 },
+  { article: 'BUJ-003', location: 'EST-C3', description: 'Bujía Iridium', stock: 100, cost: 800 },
+  { article: 'ACE-004', location: 'EST-D4', description: 'Aceite Sintético 5W30', stock: 15, cost: 12000 },
+  { article: 'LAM-005', location: 'EST-E5', description: 'Lámpara H7', stock: 200, cost: 350 },
+  { article: 'FIL-006', location: 'EST-A2', description: 'Filtro de Aire Amarok', stock: 42, cost: 2300 },
+  { article: 'FRE-007', location: 'EST-B1', description: 'Disco de Freno Delantero', stock: 18, cost: 17500 },
+  { article: 'AMP-008', location: 'EST-C1', description: 'Amortiguador Trasero', stock: 24, cost: 21000 },
+  { article: 'RUL-009', location: 'EST-D2', description: 'Rulemán de Rueda', stock: 30, cost: 5200 },
+  { article: 'COJ-010', location: 'EST-E3', description: 'Cojinete de Empuje', stock: 27, cost: 6300 },
+  { article: 'COR-011', location: 'EST-A3', description: 'Correa de Distribución', stock: 25, cost: 9800 },
+  { article: 'BAT-012', location: 'EST-B3', description: 'Batería 12V 70Ah', stock: 12, cost: 98000 },
+  { article: 'BOM-013', location: 'EST-C2', description: 'Bomba de Agua', stock: 17, cost: 14000 },
+  { article: 'EMB-014', location: 'EST-D1', description: 'Embrague Completo', stock: 9, cost: 132000 },
+  { article: 'RET-015', location: 'EST-E1', description: 'Retén de Cigüeñal', stock: 65, cost: 1800 },
+];
 
 const MOCK_INVENTORIES: Inventory[] = [
   {
@@ -61,16 +68,17 @@ const MOCK_INVENTORIES: Inventory[] = [
     auditor: 'Diego Guantay',
     status: 'Abierto',
     articles: [
-      { id: '1', article: 'FIL-001', location: 'EST-A1', description: 'Filtro de Aceite Hilux', stock: 50, cost: 1500, category: 'A' },
-      { id: '2', article: 'PAS-002', location: 'EST-B2', description: 'Pastillas de Freno Corolla', stock: 20, cost: 4500, category: 'A' },
-      { id: '3', article: 'BUJ-003', location: 'EST-C3', description: 'Bujía Iridium', stock: 100, cost: 800, category: 'B' },
-      { id: '4', article: 'ACE-004', location: 'EST-D4', description: 'Aceite Sintético 5W30', stock: 15, cost: 12000, category: 'A' },
-      { id: '5', article: 'LAM-005', location: 'EST-E5', description: 'Lámpara H7', stock: 200, cost: 350, category: 'C' },
-    ]
-  }
+      { id: '1', article: 'FIL-001', location: 'EST-A1', description: 'Filtro de Aceite Hilux', stock: 50, cost: 1500, category: 'A', physicalCount: 49, difference: -1, justification: 'Faltante por entrega no registrada', validatedStatus: 'SI', adjustmentType: 'Ajuste', adjustmentQuantity: -1 },
+      { id: '2', article: 'PAS-002', location: 'EST-B2', description: 'Pastillas de Freno Corolla', stock: 20, cost: 4500, category: 'A', physicalCount: 20, difference: 0, adjustmentType: 'Sin Ajuste', adjustmentQuantity: 0 },
+      { id: '3', article: 'BUJ-003', location: 'EST-C3', description: 'Bujía Iridium', stock: 100, cost: 800, category: 'B', physicalCount: 102, difference: 2, justification: 'Ingreso pendiente de imputar', validatedStatus: 'SI', adjustmentType: 'Canje', adjustmentQuantity: 2 },
+      { id: '4', article: 'ACE-004', location: 'EST-D4', description: 'Aceite Sintético 5W30', stock: 15, cost: 12000, category: 'A', physicalCount: 14, difference: -1, justification: 'Diferencia por rotura', validatedStatus: 'NO', adjustmentType: '', adjustmentQuantity: 0 },
+      { id: '5', article: 'LAM-005', location: 'EST-E5', description: 'Lámpara H7', stock: 200, cost: 350, category: 'C', physicalCount: 200, difference: 0, adjustmentType: 'Sin Ajuste', adjustmentQuantity: 0 },
+    ],
+  },
 ];
 
-// Components
+type AppTab = 'dashboard' | 'new' | 'audit' | 'justification' | 'reports';
+
 const Card = ({ children, className, title, subtitle, action, ...props }: { children: React.ReactNode, className?: string, title?: string, subtitle?: string, action?: React.ReactNode } & React.HTMLAttributes<HTMLDivElement>) => (
   <div className={cn("bg-white border border-zinc-200 rounded-xl overflow-hidden shadow-sm", className)} {...props}>
     {(title || subtitle) && (
@@ -109,24 +117,194 @@ const StatCard = ({ title, value, icon: Icon, trend, trendValue }: { title: stri
   </Card>
 );
 
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 2 }).format(value);
+}
+
+function generateInventoryId() {
+  const now = new Date();
+  const pad = (v: number) => String(v).padStart(2, '0');
+  return `INV-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`;
+}
+
+function pickRandom<T>(list: T[], n: number) {
+  const copy = [...list];
+  for (let i = copy.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy.slice(0, Math.min(n, copy.length));
+}
+
+function applyAbcSample(baseArticles: Omit<Article, 'id' | 'category'>[]) {
+  const valued = [...baseArticles]
+    .map((item) => ({ ...item, totalValue: item.stock * item.cost }))
+    .sort((a, b) => b.totalValue - a.totalValue);
+
+  const total = valued.reduce((acc, item) => acc + item.totalValue, 0);
+  let acc = 0;
+  const categorized = valued.map((item) => {
+    acc += item.totalValue;
+    const ratio = total > 0 ? acc / total : 0;
+    const category: Category = ratio <= 0.8 ? 'A' : ratio <= 0.95 ? 'B' : 'C';
+    return { ...item, category };
+  });
+
+  const a = categorized.filter((x) => x.category === 'A');
+  const b = categorized.filter((x) => x.category === 'B');
+  const c = categorized.filter((x) => x.category === 'C');
+
+  return [...pickRandom(a, 80), ...pickRandom(b, 15), ...pickRandom(c, 5)].map((item, index) => ({
+    id: `${Date.now()}-${index}`,
+    article: item.article,
+    location: item.location,
+    description: item.description,
+    stock: item.stock,
+    cost: item.cost,
+    category: item.category,
+    physicalCount: undefined,
+    difference: 0,
+    justification: '',
+    validatedStatus: '',
+    validatedBy: '',
+    validatedAt: '',
+    adjustmentType: '',
+    adjustmentQuantity: 0,
+  }));
+}
+
+function calculateResults(articles: Article[]) {
+  const cantidadMuestra = articles.reduce((acc, a) => acc + (Number.isFinite(a.stock) ? a.stock : 0), 0);
+  const valorMuestra = articles.reduce((acc, a) => acc + a.stock * a.cost, 0);
+
+  const ajustes = articles.filter((a) => a.adjustmentType === 'Ajuste');
+  const canjes = articles.filter((a) => a.adjustmentType === 'Canje');
+
+  const faltantes = ajustes.filter((a) => (a.adjustmentQuantity ?? 0) < 0);
+  const sobrantes = ajustes.filter((a) => (a.adjustmentQuantity ?? 0) > 0);
+
+  const cantidadFaltantes = faltantes.reduce((acc, a) => acc + Math.abs(a.adjustmentQuantity ?? 0), 0);
+  const valorFaltantes = faltantes.reduce((acc, a) => acc + Math.abs(a.adjustmentQuantity ?? 0) * a.cost, 0);
+
+  const cantidadSobrantes = sobrantes.reduce((acc, a) => acc + (a.adjustmentQuantity ?? 0), 0);
+  const valorSobrantes = sobrantes.reduce((acc, a) => acc + (a.adjustmentQuantity ?? 0) * a.cost, 0);
+
+  const cantidadNeta = ajustes.reduce((acc, a) => acc + (a.adjustmentQuantity ?? 0), 0);
+  const valorNeta = ajustes.reduce((acc, a) => acc + (a.adjustmentQuantity ?? 0) * a.cost, 0);
+
+  const cantidadAbsoluta = ajustes.reduce((acc, a) => acc + Math.abs(a.adjustmentQuantity ?? 0), 0);
+  const valorAbsoluta = ajustes.reduce((acc, a) => acc + Math.abs(a.adjustmentQuantity ?? 0) * a.cost, 0);
+
+  const pct = (value: number) => (valorMuestra > 0 ? (value / valorMuestra) * 100 : 0);
+  const escala: Array<[number, number]> = [[0.0, 100], [0.1, 94], [0.8, 82], [1.6, 65], [2.4, 35], [3.3, 0]];
+  const pctAbsoluto = pct(valorAbsoluta);
+
+  let grado = 0;
+  escala.forEach(([th, g]) => {
+    if (pctAbsoluto >= th) {
+      grado = g;
+    }
+  });
+
+  return {
+    cantidadMuestra,
+    valorMuestra,
+    cantidadFaltantes,
+    valorFaltantes,
+    cantidadSobrantes,
+    valorSobrantes,
+    cantidadNeta,
+    valorNeta,
+    cantidadAbsoluta,
+    valorAbsoluta,
+    pctMuestra: 100,
+    pctFaltantes: pct(valorFaltantes),
+    pctSobrantes: pct(valorSobrantes),
+    pctNeta: pct(valorNeta),
+    pctAbsoluta: pctAbsoluto,
+    grado,
+    canjes,
+  };
+}
+
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'new' | 'audit' | 'justification' | 'reports'>('dashboard');
+  const [activeTab, setActiveTab] = useState<AppTab>('dashboard');
   const [inventories, setInventories] = useState<Inventory[]>(MOCK_INVENTORIES);
+  const [concessionaire, setConcessionaire] = useState('Autolux');
+  const [branch, setBranch] = useState(CONCESIONARIAS.Autolux[0]);
+  const [auditInventoryId, setAuditInventoryId] = useState('');
+  const [justInventoryId, setJustInventoryId] = useState('');
+  const [reportInventoryId, setReportInventoryId] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
 
-  const stats = useMemo(() => {
-    const totalValue = inventories.reduce((acc, inv) => 
-      acc + inv.articles.reduce((a, art) => a + (art.stock * art.cost), 0), 0
-    );
-    const activeCount = inventories.filter(i => i.status === 'Abierto').length;
-    return {
-      totalValue: new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(totalValue),
-      activeCount,
-      discrepancyRate: '1.8%',
-      pendingJustifications: 8
-    };
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Inventory[];
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setInventories(parsed);
+        }
+      }
+    } catch {
+      setInventories(MOCK_INVENTORIES);
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(inventories));
   }, [inventories]);
+
+  const openInventories = useMemo(() => inventories.filter((inv) => inv.status === 'Abierto'), [inventories]);
+
+  useEffect(() => {
+    if (!auditInventoryId && openInventories[0]) {
+      setAuditInventoryId(openInventories[0].id);
+    }
+    if (!justInventoryId && openInventories[0]) {
+      setJustInventoryId(openInventories[0].id);
+    }
+    if (!reportInventoryId && openInventories[0]) {
+      setReportInventoryId(openInventories[0].id);
+    }
+  }, [auditInventoryId, justInventoryId, openInventories, reportInventoryId]);
+
+  const updateInventoryArticles = (inventoryId: string, updater: (articles: Article[]) => Article[]) => {
+    setInventories((prev) => prev.map((inv) => (inv.id === inventoryId ? { ...inv, articles: updater(inv.articles) } : inv)));
+  };
+
+  const saveArticlePatch = (inventoryId: string, articleId: string, patch: Partial<Article>) => {
+    updateInventoryArticles(inventoryId, (articles) =>
+      articles.map((article) => {
+        if (article.id !== articleId) {
+          return article;
+        }
+        const updated = { ...article, ...patch };
+        const physical = updated.physicalCount;
+        if (physical === undefined || physical === null || Number.isNaN(physical)) {
+          updated.difference = 0;
+        } else {
+          updated.difference = Number(physical) - Number(updated.stock);
+        }
+        return updated;
+      }),
+    );
+  };
+
+  const stats = useMemo(() => {
+    const allArticles = inventories.flatMap((inv) => inv.articles);
+    const totalValue = allArticles.reduce((acc, art) => acc + art.stock * art.cost, 0);
+    const discrepancyValue = allArticles.reduce((acc, art) => acc + Math.abs((art.difference ?? 0) * art.cost), 0);
+    const pendingJustifications = allArticles.filter((art) => (art.difference ?? 0) !== 0 && !art.justification).length;
+    const discrepancyRate = totalValue > 0 ? ((discrepancyValue / totalValue) * 100).toFixed(2) : '0.00';
+    return {
+      totalValue: formatCurrency(totalValue),
+      activeCount: openInventories.length,
+      discrepancyRate: `${discrepancyRate}%`,
+      pendingJustifications,
+    };
+  }, [inventories, openInventories.length]);
 
   const runAiAnalysis = async () => {
     if (!process.env.GEMINI_API_KEY) {
@@ -148,6 +326,50 @@ export default function App() {
     }
   };
 
+  const createInventory = () => {
+    const id = generateInventoryId();
+    if (inventories.some((inv) => inv.id === id)) {
+      return;
+    }
+    const articles = applyAbcSample(BASE_ARTICLES);
+    const now = new Date();
+    const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const next: Inventory = {
+      id,
+      date,
+      concessionaire,
+      branch,
+      auditor: MOCK_USER.name,
+      status: 'Abierto',
+      articles,
+      closureDate: '',
+      closureUser: '',
+    };
+    setInventories((prev) => [next, ...prev]);
+    setAuditInventoryId(id);
+    setJustInventoryId(id);
+    setReportInventoryId(id);
+    setActiveTab('audit');
+  };
+
+  const auditInventory = openInventories.find((inv) => inv.id === auditInventoryId);
+  const justInventory = openInventories.find((inv) => inv.id === justInventoryId);
+  const reportInventory = openInventories.find((inv) => inv.id === reportInventoryId);
+  const reportResults = useMemo(() => calculateResults(reportInventory?.articles ?? []), [reportInventory]);
+
+  const closeInventory = (inventoryId: string) => {
+    const now = new Date();
+    const closureDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    setInventories((prev) =>
+      prev.map((inv) =>
+        inv.id === inventoryId
+          ? { ...inv, status: 'Cerrado', closureDate, closureUser: MOCK_USER.id }
+          : inv,
+      ),
+    );
+    setActiveTab('dashboard');
+  };
+
   const renderContent = () => {
     switch (activeTab) {
       case 'dashboard':
@@ -161,32 +383,34 @@ export default function App() {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <Card className="lg:col-span-2" title="Distribución ABC" subtitle="Valorización de stock por categoría" action={<TrendingUp className="w-4 h-4 text-zinc-400" />}>
-                <div className="h-72">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={[
-                      { name: 'Ene', value: 4000 },
-                      { name: 'Feb', value: 3000 },
-                      { name: 'Mar', value: 5000 },
-                      { name: 'Abr', value: 4500 },
-                      { name: 'May', value: 6000 },
-                      { name: 'Jun', value: 5500 },
-                    ]}>
-                      <defs>
-                        <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#18181b" stopOpacity={0.1}/>
-                          <stop offset="95%" stopColor="#18181b" stopOpacity={0}/>
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                      <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#71717a'}} />
-                      <YAxis axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#71717a'}} />
-                      <Tooltip 
-                        contentStyle={{ borderRadius: '8px', border: '1px solid #e4e4e7', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                      />
-                      <Area type="monotone" dataKey="value" stroke="#18181b" fillOpacity={1} fill="url(#colorValue)" strokeWidth={2} />
-                    </AreaChart>
-                  </ResponsiveContainer>
+              <Card className="lg:col-span-2" title="Inventarios recientes" subtitle="Estado y trazabilidad">
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[650px] text-left border-collapse">
+                    <thead>
+                      <tr className="bg-zinc-50 border-b border-zinc-200">
+                        <th className="px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase">ID</th>
+                        <th className="px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase">Fecha</th>
+                        <th className="px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase">Concesionaria</th>
+                        <th className="px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase">Sucursal</th>
+                        <th className="px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase">Estado</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-100">
+                      {inventories.slice(0, 8).map((inv) => (
+                        <tr key={inv.id}>
+                          <td className="px-4 py-3 text-xs font-mono text-zinc-700">{inv.id}</td>
+                          <td className="px-4 py-3 text-xs text-zinc-600">{inv.date}</td>
+                          <td className="px-4 py-3 text-xs text-zinc-700">{inv.concessionaire}</td>
+                          <td className="px-4 py-3 text-xs text-zinc-700">{inv.branch}</td>
+                          <td className="px-4 py-3">
+                            <span className={cn('text-[10px] px-2 py-1 rounded-full border font-bold', inv.status === 'Abierto' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-zinc-100 text-zinc-700 border-zinc-200')}>
+                              {inv.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </Card>
 
@@ -213,23 +437,10 @@ export default function App() {
                   </div>
                 </Card>
 
-                <Card title="Estado de Categorías" className="p-0">
-                  <div className="divide-y divide-zinc-100">
-                    {[
-                      { cat: 'A', label: 'Alta Rotación', color: 'bg-rose-500', pct: 80 },
-                      { cat: 'B', label: 'Media Rotación', color: 'bg-amber-500', pct: 15 },
-                      { cat: 'C', label: 'Baja Rotación', color: 'bg-zinc-400', pct: 5 },
-                    ].map(item => (
-                      <div key={item.cat} className="p-4 flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className={cn("w-2 h-2 rounded-full", item.color)} />
-                          <div>
-                            <p className="text-xs font-bold text-zinc-900">Categoría {item.cat}</p>
-                            <p className="text-[10px] text-zinc-500">{item.label}</p>
-                          </div>
-                        </div>
-                        <p className="text-xs font-bold text-zinc-900">{item.pct}%</p>
-                      </div>
+                <Card title="Flujo operativo" className="p-0">
+                  <div className="divide-y divide-zinc-100 text-xs">
+                    {['1) Nuevo inventario (ABC)', '2) Conteo físico', '3) Justificaciones y ajustes', '4) Cierre con grado'].map((step) => (
+                      <div key={step} className="p-4 text-zinc-700 font-medium">{step}</div>
                     ))}
                   </div>
                 </Card>
@@ -251,31 +462,37 @@ export default function App() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <Card className="md:col-span-2">
                 <div className="space-y-6">
-                  <div className="border-2 border-dashed border-zinc-200 rounded-xl p-12 text-center space-y-4 hover:border-zinc-400 transition-colors cursor-pointer group">
-                    <div className="w-12 h-12 bg-zinc-50 rounded-full flex items-center justify-center mx-auto group-hover:scale-110 transition-transform">
-                      <Plus className="w-6 h-6 text-zinc-400" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold text-zinc-900">Subir Reporte de Stock</p>
-                      <p className="text-xs text-zinc-500 mt-1">Formatos soportados: .xlsx, .csv</p>
-                    </div>
+                  <div className="border border-zinc-200 rounded-xl p-5 bg-zinc-50 text-xs text-zinc-600">
+                    La lógica replica el app.py: clasificación ABC por valor, acumulado 80/15/5 y creación de inventario en estado abierto.
                   </div>
                   
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1.5">
                       <label className="text-[10px] font-bold text-zinc-400 uppercase">Concesionaria</label>
-                      <select className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900/5">
-                        <option>Autolux</option>
-                        <option>Autosol</option>
-                        <option>Ciel</option>
+                      <select
+                        className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900/5"
+                        value={concessionaire}
+                        onChange={(e) => {
+                          const next = e.target.value;
+                          setConcessionaire(next);
+                          setBranch(CONCESIONARIAS[next][0]);
+                        }}
+                      >
+                        {Object.keys(CONCESIONARIAS).map((name) => (
+                          <option key={name}>{name}</option>
+                        ))}
                       </select>
                     </div>
                     <div className="space-y-1.5">
                       <label className="text-[10px] font-bold text-zinc-400 uppercase">Sucursal</label>
-                      <select className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900/5">
-                        <option>Ax Jujuy</option>
-                        <option>Ax Salta</option>
-                        <option>Ax Tartagal</option>
+                      <select
+                        className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900/5"
+                        value={branch}
+                        onChange={(e) => setBranch(e.target.value)}
+                      >
+                        {CONCESIONARIAS[concessionaire].map((item) => (
+                          <option key={item}>{item}</option>
+                        ))}
                       </select>
                     </div>
                   </div>
@@ -284,9 +501,7 @@ export default function App() {
 
               <Card title="Resumen ABC" className="bg-zinc-50 border-zinc-200">
                 <div className="space-y-6">
-                  <p className="text-xs text-zinc-500 leading-relaxed">
-                    El sistema aplicará automáticamente la regla 80/15/5 para generar una muestra representativa basada en la valorización del stock.
-                  </p>
+                    <p className="text-xs text-zinc-500 leading-relaxed">El sistema aplica la regla 80/15/5 y prepara los campos de conteo, diferencia, justificación y ajuste para iniciar el flujo.</p>
                   <div className="space-y-3">
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-zinc-500">Muestra Cat A (80%)</span>
@@ -310,7 +525,10 @@ export default function App() {
                       <div className="bg-zinc-400 h-full w-[5%]" />
                     </div>
                   </div>
-                  <button className="w-full py-2.5 bg-zinc-900 text-white rounded-lg text-sm font-bold shadow-lg shadow-zinc-900/10 hover:bg-zinc-800 transition-all">
+                  <button
+                    onClick={createInventory}
+                    className="w-full py-2.5 bg-zinc-900 text-white rounded-lg text-sm font-bold shadow-lg shadow-zinc-900/10 hover:bg-zinc-800 transition-all"
+                  >
                     Generar Inventario
                   </button>
                 </div>
@@ -319,22 +537,31 @@ export default function App() {
           </div>
         );
       case 'audit':
+        if (openInventories.length === 0) {
+          return <Card><p className="text-sm text-zinc-500">No hay inventarios abiertos para carga de conteo físico.</p></Card>;
+        }
         return (
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-xl font-bold text-zinc-900">Auditoría en Curso</h2>
-                <p className="text-xs text-zinc-500 mt-0.5">ID: INV-20240306-001 • Autolux Jujuy</p>
+                <p className="text-xs text-zinc-500 mt-0.5">Cargar conteos y calcular diferencias contra stock sistema.</p>
               </div>
               <div className="flex items-center gap-3">
-                <button className="p-2 bg-white border border-zinc-200 rounded-lg hover:bg-zinc-50 transition-colors">
-                  <Filter className="w-4 h-4 text-zinc-600" />
-                </button>
+                <select
+                  value={auditInventoryId}
+                  onChange={(e) => setAuditInventoryId(e.target.value)}
+                  className="px-3 py-2 bg-white border border-zinc-200 rounded-lg text-xs font-semibold"
+                >
+                  {openInventories.map((inv) => (
+                    <option key={inv.id} value={inv.id}>{inv.id}</option>
+                  ))}
+                </select>
                 <div className="relative">
                   <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
                   <input 
                     type="text" 
-                    placeholder="Buscar por código o descripción..." 
+                    placeholder="Búsqueda visual (MVP)" 
                     className="pl-9 pr-4 py-2 bg-white border border-zinc-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900/5 transition-all w-64"
                   />
                 </div>
@@ -355,7 +582,7 @@ export default function App() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-100">
-                  {inventories[0].articles.map(art => (
+                  {auditInventory?.articles.map((art) => (
                     <tr key={art.id} className="hover:bg-zinc-50/50 transition-colors group">
                       <td className="px-6 py-4">
                         <p className="text-sm font-bold text-zinc-900">{art.article}</p>
@@ -378,22 +605,36 @@ export default function App() {
                           type="number" 
                           className="w-full bg-white border border-zinc-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900/5 transition-all text-center font-bold"
                           placeholder="-"
+                          value={art.physicalCount ?? ''}
+                          onChange={(e) => {
+                            const value = e.target.value.trim();
+                            const parsed = value === '' ? undefined : Number(value);
+                            saveArticlePatch(auditInventoryId, art.id, { physicalCount: parsed });
+                          }}
                         />
                       </td>
                       <td className="px-6 py-4 text-right">
-                        <span className="text-sm font-mono text-zinc-400">-</span>
+                        <span className={cn('text-sm font-mono', (art.difference ?? 0) === 0 ? 'text-zinc-400' : (art.difference ?? 0) > 0 ? 'text-emerald-600' : 'text-rose-600')}>
+                          {art.difference ?? 0}
+                        </span>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
               <div className="p-6 bg-zinc-50 border-t border-zinc-100 flex items-center justify-between">
-                <p className="text-xs text-zinc-500">Mostrando {inventories[0].articles.length} artículos de la muestra ABC</p>
+                <p className="text-xs text-zinc-500">Mostrando {auditInventory?.articles.length ?? 0} artículos de la muestra ABC</p>
                 <div className="flex gap-3">
-                  <button className="px-6 py-2 bg-white border border-zinc-200 text-zinc-600 rounded-lg text-sm font-bold hover:bg-zinc-50 transition-colors">
-                    Pausar
+                  <button
+                    onClick={() => setActiveTab('justification')}
+                    className="px-6 py-2 bg-white border border-zinc-200 text-zinc-600 rounded-lg text-sm font-bold hover:bg-zinc-50 transition-colors"
+                  >
+                    Ir a Justificaciones
                   </button>
-                  <button className="px-6 py-2 bg-zinc-900 text-white rounded-lg text-sm font-bold shadow-lg shadow-zinc-900/10 hover:bg-zinc-800 transition-all">
+                  <button
+                    onClick={() => setActiveTab('reports')}
+                    className="px-6 py-2 bg-zinc-900 text-white rounded-lg text-sm font-bold shadow-lg shadow-zinc-900/10 hover:bg-zinc-800 transition-all"
+                  >
                     Finalizar Conteo
                   </button>
                 </div>
@@ -402,31 +643,45 @@ export default function App() {
           </div>
         );
       case 'justification':
+        if (openInventories.length === 0) {
+          return <Card><p className="text-sm text-zinc-500">No hay inventarios abiertos para justificar.</p></Card>;
+        }
+        const differenceRows = (justInventory?.articles ?? []).filter((art) => (art.difference ?? 0) !== 0);
         return (
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-bold text-zinc-900">Justificación de Diferencias</h2>
+              <select
+                value={justInventoryId}
+                onChange={(e) => setJustInventoryId(e.target.value)}
+                className="px-3 py-2 bg-white border border-zinc-200 rounded-lg text-xs font-semibold"
+              >
+                {openInventories.map((inv) => (
+                  <option key={inv.id} value={inv.id}>{inv.id}</option>
+                ))}
+              </select>
               <div className="flex items-center gap-2 px-3 py-1.5 bg-rose-50 text-rose-700 rounded-lg border border-rose-100">
                 <AlertTriangle className="w-4 h-4" />
-                <span className="text-xs font-bold">8 Discrepancias Críticas</span>
+                <span className="text-xs font-bold">{differenceRows.length} Discrepancias</span>
               </div>
             </div>
 
             <div className="grid grid-cols-1 gap-4">
-              {[1, 2, 3].map(i => (
-                <Card key={i} className="flex flex-col md:flex-row gap-6 p-0 overflow-hidden">
+              {differenceRows.length === 0 && <Card><p className="text-sm text-emerald-700 font-medium">Sin diferencias para justificar en este inventario.</p></Card>}
+              {differenceRows.map((item) => (
+                <Card key={item.id} className="flex flex-col md:flex-row gap-6 p-0 overflow-hidden">
                   <div className="w-full md:w-64 bg-zinc-50 p-6 border-r border-zinc-100">
                     <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2">Artículo</p>
-                    <h4 className="text-lg font-bold text-zinc-900">FIL-001</h4>
-                    <p className="text-xs text-zinc-500 mt-1">Filtro de Aceite Hilux</p>
+                    <h4 className="text-lg font-bold text-zinc-900">{item.article}</h4>
+                    <p className="text-xs text-zinc-500 mt-1">{item.description}</p>
                     <div className="mt-6 grid grid-cols-2 gap-4">
                       <div>
                         <p className="text-[10px] font-bold text-zinc-400 uppercase">Sist.</p>
-                        <p className="text-sm font-bold text-zinc-900">50</p>
+                        <p className="text-sm font-bold text-zinc-900">{item.stock}</p>
                       </div>
                       <div>
                         <p className="text-[10px] font-bold text-zinc-400 uppercase">Físico</p>
-                        <p className="text-sm font-bold text-rose-600">48</p>
+                        <p className="text-sm font-bold text-rose-600">{item.physicalCount ?? 0}</p>
                       </div>
                     </div>
                   </div>
@@ -436,27 +691,142 @@ export default function App() {
                       <textarea 
                         className="w-full bg-zinc-50 border border-zinc-200 rounded-xl p-4 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900/5 min-h-[100px]"
                         placeholder="Explique el motivo de la diferencia..."
+                        value={item.justification ?? ''}
+                        onChange={(e) => saveArticlePatch(justInventoryId, item.id, { justification: e.target.value })}
                       />
                     </div>
                     <div className="flex items-center justify-between pt-2">
                       <div className="flex items-center gap-4">
-                        <select className="text-xs font-bold bg-white border border-zinc-200 rounded-lg px-3 py-1.5 focus:outline-none">
+                        <select
+                          className="text-xs font-bold bg-white border border-zinc-200 rounded-lg px-3 py-1.5 focus:outline-none"
+                          value={item.adjustmentType ?? ''}
+                          onChange={(e) => saveArticlePatch(justInventoryId, item.id, { adjustmentType: e.target.value as Article['adjustmentType'] })}
+                        >
+                          <option value="">Seleccionar</option>
                           <option>Ajuste</option>
                           <option>Canje</option>
                           <option>Sin Ajuste</option>
                         </select>
+                        {(item.adjustmentType === 'Ajuste' || item.adjustmentType === 'Canje') && (
+                          <input
+                            type="number"
+                            className="w-24 border border-zinc-200 rounded-lg px-2 py-1.5 text-xs"
+                            value={item.adjustmentQuantity ?? 0}
+                            onChange={(e) => saveArticlePatch(justInventoryId, item.id, { adjustmentQuantity: Number(e.target.value) })}
+                          />
+                        )}
                         <div className="flex items-center gap-2">
-                          <input type="checkbox" id={`val-${i}`} className="w-4 h-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900" />
-                          <label htmlFor={`val-${i}`} className="text-xs font-medium text-zinc-600">Validado por Auditor</label>
+                          <input
+                            type="checkbox"
+                            id={`val-${item.id}`}
+                            className="w-4 h-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900"
+                            checked={item.validatedStatus === 'SI'}
+                            onChange={(e) =>
+                              saveArticlePatch(justInventoryId, item.id, {
+                                validatedStatus: e.target.checked ? 'SI' : 'NO',
+                                validatedBy: MOCK_USER.id,
+                                validatedAt: new Date().toISOString(),
+                              })
+                            }
+                          />
+                          <label htmlFor={`val-${item.id}`} className="text-xs font-medium text-zinc-600">Validado por Auditor</label>
                         </div>
                       </div>
-                      <button className="px-4 py-1.5 bg-zinc-900 text-white rounded-lg text-xs font-bold hover:bg-zinc-800 transition-colors">
-                        Confirmar
-                      </button>
+                      <span className="text-xs font-semibold text-zinc-500">Dif: {item.difference ?? 0}</span>
                     </div>
                   </div>
                 </Card>
               ))}
+            </div>
+          </div>
+        );
+      case 'reports':
+        if (openInventories.length === 0) {
+          return <Card><p className="text-sm text-zinc-500">No hay inventarios abiertos para cierre y reporte.</p></Card>;
+        }
+        return (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-bold text-zinc-900">Cierre + Reporte</h2>
+              <select
+                value={reportInventoryId}
+                onChange={(e) => setReportInventoryId(e.target.value)}
+                className="px-3 py-2 bg-white border border-zinc-200 rounded-lg text-xs font-semibold"
+              >
+                {openInventories.map((inv) => (
+                  <option key={inv.id} value={inv.id}>{inv.id}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+              <StatCard title="Muestra" value={reportResults.cantidadMuestra} icon={Package} />
+              <StatCard title="Faltantes" value={reportResults.cantidadFaltantes} icon={AlertTriangle} trend="down" trendValue={`${reportResults.pctFaltantes.toFixed(2)}%`} />
+              <StatCard title="Sobrantes" value={reportResults.cantidadSobrantes} icon={CheckCircle2} trend="up" trendValue={`${reportResults.pctSobrantes.toFixed(2)}%`} />
+              <StatCard title="Grado" value={`${reportResults.grado}%`} icon={ClipboardCheck} />
+            </div>
+
+            <Card title="Resultado de Inventario">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-zinc-50 border-b border-zinc-200">
+                    <th className="px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase">Detalle</th>
+                    <th className="px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase">Q</th>
+                    <th className="px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase">$ Ajuste</th>
+                    <th className="px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase">%</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-100 text-sm">
+                  {[
+                    { d: 'Muestra', q: reportResults.cantidadMuestra, v: reportResults.valorMuestra, p: reportResults.pctMuestra },
+                    { d: 'Faltantes', q: reportResults.cantidadFaltantes, v: reportResults.valorFaltantes, p: reportResults.pctFaltantes },
+                    { d: 'Sobrantes', q: reportResults.cantidadSobrantes, v: reportResults.valorSobrantes, p: reportResults.pctSobrantes },
+                    { d: 'Dif Neta', q: reportResults.cantidadNeta, v: reportResults.valorNeta, p: reportResults.pctNeta },
+                    { d: 'Dif Absoluta', q: reportResults.cantidadAbsoluta, v: reportResults.valorAbsoluta, p: reportResults.pctAbsoluta },
+                  ].map((row) => (
+                    <tr key={row.d}>
+                      <td className="px-4 py-3">{row.d}</td>
+                      <td className="px-4 py-3">{row.q}</td>
+                      <td className="px-4 py-3">{formatCurrency(row.v)}</td>
+                      <td className="px-4 py-3">{row.p.toFixed(2)}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Card>
+
+            {reportResults.canjes.length > 0 && (
+              <Card title="Canjes registrados">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-zinc-50 border-b border-zinc-200">
+                      <th className="px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase">Artículo</th>
+                      <th className="px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase">Locación</th>
+                      <th className="px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase">Cantidad</th>
+                      <th className="px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase">Valor total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-100 text-sm">
+                    {reportResults.canjes.map((item) => (
+                      <tr key={item.id}>
+                        <td className="px-4 py-3">{item.article}</td>
+                        <td className="px-4 py-3">{item.location}</td>
+                        <td className="px-4 py-3">{item.adjustmentQuantity ?? 0}</td>
+                        <td className="px-4 py-3">{formatCurrency((item.adjustmentQuantity ?? 0) * item.cost)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </Card>
+            )}
+
+            <div className="flex justify-end">
+              <button
+                onClick={() => closeInventory(reportInventoryId)}
+                className="px-6 py-2 bg-zinc-900 text-white rounded-lg text-sm font-bold shadow-lg shadow-zinc-900/10 hover:bg-zinc-800 transition-all"
+              >
+                Cerrar Inventario
+              </button>
             </div>
           </div>
         );
@@ -554,7 +924,7 @@ export default function App() {
             >
               <div className="flex flex-col gap-1 mb-8">
                 <h1 className="text-2xl font-bold text-zinc-900 tracking-tight capitalize">{activeTab}</h1>
-                <p className="text-sm text-zinc-500">Gestione y supervise el estado de sus inventarios rotativos.</p>
+                <p className="text-sm text-zinc-500">Lógica operativa basada en el flujo de app.py (ABC, conteo, justificación, ajustes y cierre).</p>
               </div>
               {renderContent()}
             </motion.div>
