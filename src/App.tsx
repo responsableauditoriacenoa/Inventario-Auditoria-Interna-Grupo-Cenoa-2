@@ -324,7 +324,7 @@ export default function App() {
   const openInventories = useMemo(() => inventories.filter((inv) => inv.status === 'Abierto'), [inventories]);
   const canAudit = currentUser?.role === 'Auditor' || currentUser?.role === 'admin';
   const canManageInventory = canAudit;
-  const canValidate = currentUser?.role === 'Auditor';
+  const canValidate = canAudit;
   const canDepositJustify = currentUser?.role === 'Deposito';
   const importedSampleStats = useMemo(() => {
     if (importedRows.length === 0) {
