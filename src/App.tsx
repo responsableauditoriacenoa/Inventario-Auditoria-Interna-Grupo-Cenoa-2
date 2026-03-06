@@ -21,6 +21,7 @@ import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { Inventory, Article, Category, User } from './types';
 import { GoogleGenAI } from '@google/genai';
+import * as XLSX from 'xlsx';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -44,7 +45,15 @@ const CONCESIONARIAS: Record<string, string[]> = {
   Portico: ['Las Lomas', 'Brown'],
 };
 
-const BASE_ARTICLES: Omit<Article, 'id' | 'category'>[] = [
+const C_ART = 'Artículo';
+const C_LOC = 'Locación';
+const C_DESC = 'Descripción';
+const C_STOCK = 'Stock';
+const C_COSTO = 'Cto.Rep.';
+
+type SourceArticle = Omit<Article, 'id' | 'category'>;
+
+const BASE_ARTICLES: SourceArticle[] = [
   { article: 'FIL-001', location: 'EST-A1', description: 'Filtro de Aceite Hilux', stock: 50, cost: 1500 },
   { article: 'PAS-002', location: 'EST-B2', description: 'Pastillas de Freno Corolla', stock: 20, cost: 4500 },
   { article: 'BUJ-003', location: 'EST-C3', description: 'Bujía Iridium', stock: 100, cost: 800 },
@@ -139,7 +148,24 @@ function pickRandom<T>(list: T[], n: number) {
   return copy.slice(0, Math.min(n, copy.length));
 }
 
-function applyAbcSample(baseArticles: Omit<Article, 'id' | 'category'>[]) {
+function parseArNumber(value: unknown) {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : 0;
+  }
+  const raw = String(value ?? '').trim();
+  if (!raw) {
+    return 0;
+  }
+  if (raw.includes(',')) {
+    const normalized = raw.replace(/\./g, '').replace(',', '.');
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function splitAbcCategories(baseArticles: SourceArticle[]) {
   const valued = [...baseArticles]
     .map((item) => ({ ...item, totalValue: item.stock * item.cost }))
     .sort((a, b) => b.totalValue - a.totalValue);
@@ -153,9 +179,15 @@ function applyAbcSample(baseArticles: Omit<Article, 'id' | 'category'>[]) {
     return { ...item, category };
   });
 
-  const a = categorized.filter((x) => x.category === 'A');
-  const b = categorized.filter((x) => x.category === 'B');
-  const c = categorized.filter((x) => x.category === 'C');
+  return {
+    a: categorized.filter((x) => x.category === 'A'),
+    b: categorized.filter((x) => x.category === 'B'),
+    c: categorized.filter((x) => x.category === 'C'),
+  };
+}
+
+function applyAbcSample(baseArticles: SourceArticle[]) {
+  const { a, b, c } = splitAbcCategories(baseArticles);
 
   return [...pickRandom(a, 80), ...pickRandom(b, 15), ...pickRandom(c, 5)].map((item, index) => ({
     id: `${Date.now()}-${index}`,
@@ -237,6 +269,9 @@ export default function App() {
   const [loginUserId, setLoginUserId] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState('');
+  const [importedRows, setImportedRows] = useState<SourceArticle[]>([]);
+  const [importedFileName, setImportedFileName] = useState('');
+  const [importError, setImportError] = useState('');
   const [concessionaire, setConcessionaire] = useState('Autolux');
   const [branch, setBranch] = useState(CONCESIONARIAS.Autolux[0]);
   const [auditInventoryId, setAuditInventoryId] = useState('');
@@ -291,6 +326,18 @@ export default function App() {
   const canManageInventory = canAudit;
   const canValidate = currentUser?.role === 'Auditor';
   const canDepositJustify = currentUser?.role === 'Deposito' || currentUser?.role === 'admin';
+  const importedSampleStats = useMemo(() => {
+    if (importedRows.length === 0) {
+      return { a: 80, b: 15, c: 5, total: 0 };
+    }
+    const { a, b, c } = splitAbcCategories(importedRows);
+    return {
+      a: Math.min(80, a.length),
+      b: Math.min(15, b.length),
+      c: Math.min(5, c.length),
+      total: importedRows.length,
+    };
+  }, [importedRows]);
 
   useEffect(() => {
     if (!auditInventoryId && openInventories[0]) {
@@ -386,15 +433,75 @@ export default function App() {
     setActiveTab('dashboard');
   };
 
+  const handleExcelImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    try {
+      setImportError('');
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: 'array' });
+      const firstSheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[firstSheetName];
+
+      const headerRows = XLSX.utils.sheet_to_json<string[]>(worksheet, { header: 1, blankrows: false });
+      const headers = (headerRows[0] ?? []).map((h) => String(h).trim());
+      const requiredColumns = [C_ART, C_LOC, C_DESC, C_STOCK, C_COSTO];
+      const missing = requiredColumns.filter((column) => !headers.includes(column));
+
+      if (missing.length > 0) {
+        setImportError(`Faltan columnas obligatorias: ${missing.join(', ')}`);
+        setImportedRows([]);
+        setImportedFileName('');
+        return;
+      }
+
+      const dataRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: '' });
+      const normalized: SourceArticle[] = dataRows
+        .map((row) => ({
+          article: String(row[C_ART] ?? '').trim(),
+          location: String(row[C_LOC] ?? '').trim(),
+          description: String(row[C_DESC] ?? '').trim(),
+          stock: parseArNumber(row[C_STOCK]),
+          cost: parseArNumber(row[C_COSTO]),
+        }))
+        .filter((row) => row.article && row.location);
+
+      if (normalized.length === 0) {
+        setImportError('El archivo no contiene filas válidas para procesar.');
+        setImportedRows([]);
+        setImportedFileName('');
+        return;
+      }
+
+      setImportedRows(normalized);
+      setImportedFileName(file.name);
+      setImportError('');
+    } catch {
+      setImportError('No se pudo leer el archivo Excel. Verificá formato y estructura.');
+      setImportedRows([]);
+      setImportedFileName('');
+    } finally {
+      event.target.value = '';
+    }
+  };
+
   const createInventory = () => {
     if (!currentUser || !canManageInventory) {
+      return;
+    }
+    if (importedRows.length === 0) {
+      setImportError('Debes importar un Excel válido para generar el inventario.');
+      setActiveTab('new');
       return;
     }
     const id = generateInventoryId();
     if (inventories.some((inv) => inv.id === id)) {
       return;
     }
-    const articles = applyAbcSample(BASE_ARTICLES);
+    const articles = applyAbcSample(importedRows.length > 0 ? importedRows : BASE_ARTICLES);
     const now = new Date();
     const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
     const next: Inventory = {
@@ -412,6 +519,9 @@ export default function App() {
     setAuditInventoryId(id);
     setJustInventoryId(id);
     setReportInventoryId(id);
+    setImportedRows([]);
+    setImportedFileName('');
+    setImportError('');
     setActiveTab('audit');
   };
 
@@ -531,9 +641,49 @@ export default function App() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <Card className="md:col-span-2">
                 <div className="space-y-6">
-                  <div className="border border-zinc-200 rounded-xl p-5 bg-zinc-50 text-xs text-zinc-600">
-                    La lógica replica el app.py: clasificación ABC por valor, acumulado 80/15/5 y creación de inventario en estado abierto.
-                  </div>
+                  <label className="border-2 border-dashed border-zinc-200 rounded-xl p-12 text-center space-y-4 hover:border-zinc-400 transition-colors cursor-pointer group block">
+                    <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleExcelImport} />
+                    <div className="w-12 h-12 bg-zinc-50 rounded-full flex items-center justify-center mx-auto group-hover:scale-110 transition-transform">
+                      <Plus className="w-6 h-6 text-zinc-400" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-zinc-900">Subir Reporte de Stock (.xlsx)</p>
+                      <p className="text-xs text-zinc-500 mt-1">Columnas requeridas: Artículo, Locación, Descripción, Stock, Cto.Rep.</p>
+                      {importedFileName && <p className="text-xs text-emerald-700 mt-2 font-semibold">Archivo cargado: {importedFileName}</p>}
+                    </div>
+                  </label>
+
+                  {importError && <p className="text-xs text-rose-600 font-semibold">{importError}</p>}
+
+                  {importedRows.length > 0 && (
+                    <div className="border border-zinc-200 rounded-xl p-4">
+                      <p className="text-xs font-semibold text-zinc-700 mb-3">Vista previa de importación ({importedRows.length} filas)</p>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse min-w-[700px]">
+                          <thead>
+                            <tr className="bg-zinc-50 border-b border-zinc-200">
+                              <th className="px-3 py-2 text-[10px] font-bold text-zinc-500 uppercase">Artículo</th>
+                              <th className="px-3 py-2 text-[10px] font-bold text-zinc-500 uppercase">Locación</th>
+                              <th className="px-3 py-2 text-[10px] font-bold text-zinc-500 uppercase">Descripción</th>
+                              <th className="px-3 py-2 text-[10px] font-bold text-zinc-500 uppercase text-right">Stock</th>
+                              <th className="px-3 py-2 text-[10px] font-bold text-zinc-500 uppercase text-right">Costo</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-zinc-100 text-xs">
+                            {importedRows.slice(0, 8).map((row, index) => (
+                              <tr key={`${row.article}-${row.location}-${index}`}>
+                                <td className="px-3 py-2 font-mono">{row.article}</td>
+                                <td className="px-3 py-2 font-mono">{row.location}</td>
+                                <td className="px-3 py-2">{row.description}</td>
+                                <td className="px-3 py-2 text-right">{row.stock}</td>
+                                <td className="px-3 py-2 text-right">{formatCurrency(row.cost)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
                   
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1.5">
@@ -574,25 +724,28 @@ export default function App() {
                   <div className="space-y-3">
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-zinc-500">Muestra Cat A (80%)</span>
-                      <span className="font-bold text-zinc-900">80 items</span>
+                      <span className="font-bold text-zinc-900">{importedSampleStats.a} items</span>
                     </div>
                     <div className="w-full bg-zinc-200 h-1.5 rounded-full overflow-hidden">
                       <div className="bg-rose-500 h-full w-[80%]" />
                     </div>
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-zinc-500">Muestra Cat B (15%)</span>
-                      <span className="font-bold text-zinc-900">15 items</span>
+                      <span className="font-bold text-zinc-900">{importedSampleStats.b} items</span>
                     </div>
                     <div className="w-full bg-zinc-200 h-1.5 rounded-full overflow-hidden">
                       <div className="bg-amber-500 h-full w-[15%]" />
                     </div>
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-zinc-500">Muestra Cat C (5%)</span>
-                      <span className="font-bold text-zinc-900">5 items</span>
+                      <span className="font-bold text-zinc-900">{importedSampleStats.c} items</span>
                     </div>
                     <div className="w-full bg-zinc-200 h-1.5 rounded-full overflow-hidden">
                       <div className="bg-zinc-400 h-full w-[5%]" />
                     </div>
+                    {importedSampleStats.total > 0 && (
+                      <p className="text-[11px] text-zinc-500">Total filas importadas: {importedSampleStats.total}</p>
+                    )}
                   </div>
                   <button
                     onClick={createInventory}
