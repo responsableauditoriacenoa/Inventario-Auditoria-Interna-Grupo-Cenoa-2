@@ -27,11 +27,14 @@ function cn(...inputs: ClassValue[]) {
 }
 
 const STORAGE_KEY = 'cenoa-inventories-v1';
+const SESSION_KEY = 'cenoa-session-v1';
 
-const MOCK_USER: User = {
-  id: 'diego_guantay',
-  name: 'Diego Guantay',
-  role: 'Auditor',
+const TEST_CREDENTIALS: Record<string, { password: string; role: User['role']; name: string }> = {
+  diego_guantay: { password: 'DieguG123!', role: 'Auditor', name: 'Diego Guantay' },
+  nancy_fernandez: { password: 'NancyF123!', role: 'Auditor', name: 'Nancy Fernandez' },
+  gustavo_zambrano: { password: 'GustavoZ123!', role: 'Auditor', name: 'Gustavo Zambrano' },
+  admin: { password: 'Admin123!', role: 'admin', name: 'Admin' },
+  jefe_repuestos: { password: 'JefeRep123!', role: 'Deposito', name: 'Jefe de Repuestos' },
 };
 
 const CONCESIONARIAS: Record<string, string[]> = {
@@ -230,6 +233,10 @@ function calculateResults(articles: Article[]) {
 export default function App() {
   const [activeTab, setActiveTab] = useState<AppTab>('dashboard');
   const [inventories, setInventories] = useState<Inventory[]>(MOCK_INVENTORIES);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [loginUserId, setLoginUserId] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
   const [concessionaire, setConcessionaire] = useState('Autolux');
   const [branch, setBranch] = useState(CONCESIONARIAS.Autolux[0]);
   const [auditInventoryId, setAuditInventoryId] = useState('');
@@ -256,7 +263,34 @@ export default function App() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(inventories));
   }, [inventories]);
 
+  useEffect(() => {
+    try {
+      const rawSession = localStorage.getItem(SESSION_KEY);
+      if (!rawSession) {
+        return;
+      }
+      const parsed = JSON.parse(rawSession) as User;
+      if (parsed?.id && parsed?.role && parsed?.name) {
+        setCurrentUser(parsed);
+      }
+    } catch {
+      setCurrentUser(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!currentUser) {
+      localStorage.removeItem(SESSION_KEY);
+      return;
+    }
+    localStorage.setItem(SESSION_KEY, JSON.stringify(currentUser));
+  }, [currentUser]);
+
   const openInventories = useMemo(() => inventories.filter((inv) => inv.status === 'Abierto'), [inventories]);
+  const canAudit = currentUser?.role === 'Auditor' || currentUser?.role === 'admin';
+  const canManageInventory = canAudit;
+  const canValidate = currentUser?.role === 'Auditor';
+  const canDepositJustify = currentUser?.role === 'Deposito' || currentUser?.role === 'admin';
 
   useEffect(() => {
     if (!auditInventoryId && openInventories[0]) {
@@ -326,7 +360,36 @@ export default function App() {
     }
   };
 
+  const handleLogin = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const normalizedUser = loginUserId.trim();
+    const found = TEST_CREDENTIALS[normalizedUser];
+    if (!found) {
+      setLoginError('Usuario no encontrado');
+      return;
+    }
+    if (found.password !== loginPassword) {
+      setLoginError('Contraseña incorrecta');
+      return;
+    }
+    setCurrentUser({ id: normalizedUser, name: found.name, role: found.role });
+    setLoginError('');
+    setLoginPassword('');
+    setActiveTab('dashboard');
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    setLoginUserId('');
+    setLoginPassword('');
+    setLoginError('');
+    setActiveTab('dashboard');
+  };
+
   const createInventory = () => {
+    if (!currentUser || !canManageInventory) {
+      return;
+    }
     const id = generateInventoryId();
     if (inventories.some((inv) => inv.id === id)) {
       return;
@@ -339,7 +402,7 @@ export default function App() {
       date,
       concessionaire,
       branch,
-      auditor: MOCK_USER.name,
+      auditor: currentUser.name,
       status: 'Abierto',
       articles,
       closureDate: '',
@@ -358,12 +421,15 @@ export default function App() {
   const reportResults = useMemo(() => calculateResults(reportInventory?.articles ?? []), [reportInventory]);
 
   const closeInventory = (inventoryId: string) => {
+    if (!currentUser || !canManageInventory) {
+      return;
+    }
     const now = new Date();
     const closureDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
     setInventories((prev) =>
       prev.map((inv) =>
         inv.id === inventoryId
-          ? { ...inv, status: 'Cerrado', closureDate, closureUser: MOCK_USER.id }
+          ? { ...inv, status: 'Cerrado', closureDate, closureUser: currentUser.id }
           : inv,
       ),
     );
@@ -449,6 +515,9 @@ export default function App() {
           </div>
         );
       case 'new':
+        if (!canManageInventory) {
+          return <Card><p className="text-sm text-zinc-500">Solo Auditores o admin pueden generar inventarios.</p></Card>;
+        }
         return (
           <div className="max-w-4xl mx-auto space-y-6">
             <div className="flex items-center justify-between">
@@ -537,6 +606,9 @@ export default function App() {
           </div>
         );
       case 'audit':
+        if (!canAudit) {
+          return <Card><p className="text-sm text-zinc-500">Solo Auditores o admin pueden cargar conteo físico.</p></Card>;
+        }
         if (openInventories.length === 0) {
           return <Card><p className="text-sm text-zinc-500">No hay inventarios abiertos para carga de conteo físico.</p></Card>;
         }
@@ -693,6 +765,7 @@ export default function App() {
                         placeholder="Explique el motivo de la diferencia..."
                         value={item.justification ?? ''}
                         onChange={(e) => saveArticlePatch(justInventoryId, item.id, { justification: e.target.value })}
+                        disabled={!canDepositJustify}
                       />
                     </div>
                     <div className="flex items-center justify-between pt-2">
@@ -701,6 +774,7 @@ export default function App() {
                           className="text-xs font-bold bg-white border border-zinc-200 rounded-lg px-3 py-1.5 focus:outline-none"
                           value={item.adjustmentType ?? ''}
                           onChange={(e) => saveArticlePatch(justInventoryId, item.id, { adjustmentType: e.target.value as Article['adjustmentType'] })}
+                          disabled={!canValidate || item.validatedStatus !== 'SI'}
                         >
                           <option value="">Seleccionar</option>
                           <option>Ajuste</option>
@@ -713,6 +787,7 @@ export default function App() {
                             className="w-24 border border-zinc-200 rounded-lg px-2 py-1.5 text-xs"
                             value={item.adjustmentQuantity ?? 0}
                             onChange={(e) => saveArticlePatch(justInventoryId, item.id, { adjustmentQuantity: Number(e.target.value) })}
+                            disabled={!canValidate || item.validatedStatus !== 'SI'}
                           />
                         )}
                         <div className="flex items-center gap-2">
@@ -721,10 +796,11 @@ export default function App() {
                             id={`val-${item.id}`}
                             className="w-4 h-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900"
                             checked={item.validatedStatus === 'SI'}
+                            disabled={!canValidate}
                             onChange={(e) =>
                               saveArticlePatch(justInventoryId, item.id, {
                                 validatedStatus: e.target.checked ? 'SI' : 'NO',
-                                validatedBy: MOCK_USER.id,
+                                validatedBy: currentUser?.id ?? '',
                                 validatedAt: new Date().toISOString(),
                               })
                             }
@@ -741,6 +817,9 @@ export default function App() {
           </div>
         );
       case 'reports':
+        if (!canManageInventory) {
+          return <Card><p className="text-sm text-zinc-500">Solo Auditores o admin pueden cerrar y reportar inventarios.</p></Card>;
+        }
         if (openInventories.length === 0) {
           return <Card><p className="text-sm text-zinc-500">No hay inventarios abiertos para cierre y reporte.</p></Card>;
         }
@@ -835,6 +914,64 @@ export default function App() {
     }
   };
 
+  if (!currentUser) {
+    return (
+      <div className="min-h-screen bg-[#FAFAFA] text-zinc-900 flex items-center justify-center p-6">
+        <div className="w-full max-w-4xl grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <Card title="Acceso al sistema" subtitle="Inventarios Rotativos - Grupo Cenoa">
+            <form className="space-y-4" onSubmit={handleLogin}>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-zinc-400 uppercase">Usuario (ID)</label>
+                <input
+                  value={loginUserId}
+                  onChange={(e) => setLoginUserId(e.target.value)}
+                  className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900/5"
+                  placeholder="Ej: diego_guantay"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-zinc-400 uppercase">Contraseña</label>
+                <input
+                  type="password"
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                  className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900/5"
+                />
+              </div>
+              {loginError && <p className="text-xs text-rose-600 font-semibold">{loginError}</p>}
+              <button type="submit" className="w-full py-2.5 bg-zinc-900 text-white rounded-lg text-sm font-bold hover:bg-zinc-800 transition-all">
+                Ingresar
+              </button>
+            </form>
+          </Card>
+
+          <Card title="Credenciales de prueba" subtitle="Replicadas desde el sistema fuente">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-zinc-50 border-b border-zinc-200">
+                    <th className="px-3 py-2 text-[10px] font-bold text-zinc-500 uppercase">Usuario</th>
+                    <th className="px-3 py-2 text-[10px] font-bold text-zinc-500 uppercase">Contraseña</th>
+                    <th className="px-3 py-2 text-[10px] font-bold text-zinc-500 uppercase">Rol</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-100 text-xs">
+                  {Object.entries(TEST_CREDENTIALS).map(([userId, data]) => (
+                    <tr key={userId}>
+                      <td className="px-3 py-2 font-mono">{userId}</td>
+                      <td className="px-3 py-2">{data.password}</td>
+                      <td className="px-3 py-2">{data.role}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#FAFAFA] text-zinc-900 flex font-sans selection:bg-zinc-900 selection:text-white">
       {/* Sidebar */}
@@ -876,14 +1013,14 @@ export default function App() {
         <div className="p-4 border-t border-zinc-100">
           <div className="flex items-center gap-3 p-3 bg-zinc-50 rounded-2xl border border-zinc-100 mb-4">
             <div className="w-9 h-9 rounded-xl bg-white border border-zinc-200 flex items-center justify-center text-xs font-bold text-zinc-900 shadow-sm">
-              DG
+              {currentUser.name.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase()}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-bold text-zinc-900 truncate">{MOCK_USER.name}</p>
-              <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-semibold">{MOCK_USER.role}</p>
+              <p className="text-xs font-bold text-zinc-900 truncate">{currentUser.name}</p>
+              <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-semibold">{currentUser.role}</p>
             </div>
           </div>
-          <button className="w-full flex items-center gap-3 px-3 py-2.5 text-zinc-500 hover:text-rose-600 hover:bg-rose-50 rounded-xl text-sm font-medium transition-all group">
+          <button onClick={handleLogout} className="w-full flex items-center gap-3 px-3 py-2.5 text-zinc-500 hover:text-rose-600 hover:bg-rose-50 rounded-xl text-sm font-medium transition-all group">
             <LogOut className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
             Cerrar Sesión
           </button>
