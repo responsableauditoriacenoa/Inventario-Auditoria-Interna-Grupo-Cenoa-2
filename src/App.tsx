@@ -208,27 +208,43 @@ function applyAbcSample(baseArticles: SourceArticle[]) {
   }));
 }
 
+function toNumber(value: unknown) {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function quantifyByCost(cost: number, quantity: number) {
+  return toNumber(cost) * toNumber(quantity);
+}
+
 function calculateResults(articles: Article[]) {
-  const cantidadMuestra = articles.reduce((acc, a) => acc + (Number.isFinite(a.stock) ? a.stock : 0), 0);
-  const valorMuestra = articles.reduce((acc, a) => acc + a.stock * a.cost, 0);
+  const normalized = articles.map((article) => ({
+    ...article,
+    stockN: toNumber(article.stock),
+    costN: toNumber(article.cost),
+    adjustmentN: toNumber(article.adjustmentQuantity ?? 0),
+  }));
 
-  const ajustes = articles.filter((a) => a.adjustmentType === 'Ajuste');
-  const canjes = articles.filter((a) => a.adjustmentType === 'Canje');
+  const cantidadMuestra = normalized.reduce((acc, a) => acc + a.stockN, 0);
+  const valorMuestra = normalized.reduce((acc, a) => acc + quantifyByCost(a.costN, a.stockN), 0);
 
-  const faltantes = ajustes.filter((a) => (a.adjustmentQuantity ?? 0) < 0);
-  const sobrantes = ajustes.filter((a) => (a.adjustmentQuantity ?? 0) > 0);
+  const ajustes = normalized.filter((a) => a.adjustmentType === 'Ajuste');
+  const canjes = normalized.filter((a) => a.adjustmentType === 'Canje');
 
-  const cantidadFaltantes = faltantes.reduce((acc, a) => acc + Math.abs(a.adjustmentQuantity ?? 0), 0);
-  const valorFaltantes = faltantes.reduce((acc, a) => acc + Math.abs(a.adjustmentQuantity ?? 0) * a.cost, 0);
+  const faltantes = ajustes.filter((a) => a.adjustmentN < 0);
+  const sobrantes = ajustes.filter((a) => a.adjustmentN > 0);
 
-  const cantidadSobrantes = sobrantes.reduce((acc, a) => acc + (a.adjustmentQuantity ?? 0), 0);
-  const valorSobrantes = sobrantes.reduce((acc, a) => acc + (a.adjustmentQuantity ?? 0) * a.cost, 0);
+  const cantidadFaltantes = faltantes.reduce((acc, a) => acc + Math.abs(a.adjustmentN), 0);
+  const valorFaltantes = faltantes.reduce((acc, a) => acc + quantifyByCost(a.costN, Math.abs(a.adjustmentN)), 0);
 
-  const cantidadNeta = ajustes.reduce((acc, a) => acc + (a.adjustmentQuantity ?? 0), 0);
-  const valorNeta = ajustes.reduce((acc, a) => acc + (a.adjustmentQuantity ?? 0) * a.cost, 0);
+  const cantidadSobrantes = sobrantes.reduce((acc, a) => acc + a.adjustmentN, 0);
+  const valorSobrantes = sobrantes.reduce((acc, a) => acc + quantifyByCost(a.costN, a.adjustmentN), 0);
 
-  const cantidadAbsoluta = ajustes.reduce((acc, a) => acc + Math.abs(a.adjustmentQuantity ?? 0), 0);
-  const valorAbsoluta = ajustes.reduce((acc, a) => acc + Math.abs(a.adjustmentQuantity ?? 0) * a.cost, 0);
+  const cantidadNeta = ajustes.reduce((acc, a) => acc + a.adjustmentN, 0);
+  const valorNeta = ajustes.reduce((acc, a) => acc + quantifyByCost(a.costN, a.adjustmentN), 0);
+
+  const cantidadAbsoluta = ajustes.reduce((acc, a) => acc + Math.abs(a.adjustmentN), 0);
+  const valorAbsoluta = ajustes.reduce((acc, a) => acc + quantifyByCost(a.costN, Math.abs(a.adjustmentN)), 0);
 
   const pct = (value: number) => (valorMuestra > 0 ? (value / valorMuestra) * 100 : 0);
   const escala: Array<[number, number]> = [[0.0, 100], [0.1, 94], [0.8, 82], [1.6, 65], [2.4, 35], [3.3, 0]];
@@ -1019,7 +1035,7 @@ export default function App() {
                   <tr className="bg-zinc-50 border-b border-zinc-200">
                     <th className="px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase">Detalle</th>
                     <th className="px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase">Q</th>
-                    <th className="px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase">$ Ajuste</th>
+                    <th className="px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase">$ Cuantificación</th>
                     <th className="px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase">%</th>
                   </tr>
                 </thead>
