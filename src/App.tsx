@@ -395,6 +395,7 @@ export default function App() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
   const [saveFeedback, setSaveFeedback] = useState('');
+  const [canjeFeedback, setCanjeFeedback] = useState('');
 
   useEffect(() => {
     try {
@@ -559,9 +560,71 @@ export default function App() {
     if (status !== 'SI') {
       basePatch.adjustmentType = '';
       basePatch.adjustmentQuantity = 0;
+      basePatch.counterpartArticleCode = '';
     }
 
     saveArticlePatch(inventoryId, articleId, basePatch);
+  };
+
+  const applyCanjeCounterpart = (inventoryId: string, sourceArticleId: string, rawCounterpartCode: string) => {
+    const counterpartCode = rawCounterpartCode.trim();
+    if (!counterpartCode) {
+      setCanjeFeedback('Ingresá el código del artículo para aplicar el canje.');
+      return;
+    }
+
+    setInventories((prev) => prev.map((inventory) => {
+      if (inventory.id !== inventoryId) {
+        return inventory;
+      }
+
+      const source = inventory.articles.find((item) => item.id === sourceArticleId);
+      if (!source || source.adjustmentType !== 'Canje' || source.validatedStatus !== 'SI') {
+        setCanjeFeedback('El artículo origen debe estar validado en SI y con Tipo de Ajuste = Canje.');
+        return inventory;
+      }
+
+      const sourceQty = toNumber(source.adjustmentQuantity ?? 0);
+      if (sourceQty === 0) {
+        setCanjeFeedback('Definí una cantidad de canje distinta de 0 para el artículo origen.');
+        return inventory;
+      }
+
+      const counterpart = inventory.articles.find((item) => item.article.trim().toLowerCase() === counterpartCode.toLowerCase());
+      if (!counterpart) {
+        setCanjeFeedback(`No se encontró el artículo ${counterpartCode} en este inventario.`);
+        return inventory;
+      }
+
+      if (counterpart.id === source.id) {
+        setCanjeFeedback('El artículo de canje no puede ser el mismo artículo origen.');
+        return inventory;
+      }
+
+      setCanjeFeedback(`Canje aplicado: ${source.article} (${sourceQty}) -> ${counterpart.article} (${-sourceQty}).`);
+
+      return {
+        ...inventory,
+        articles: inventory.articles.map((item) => {
+          if (item.id === source.id) {
+            return {
+              ...item,
+              counterpartArticleCode: counterpart.article,
+            };
+          }
+
+          if (item.id === counterpart.id) {
+            return {
+              ...item,
+              adjustmentType: 'Canje' as Article['adjustmentType'],
+              adjustmentQuantity: -sourceQty,
+            };
+          }
+
+          return item;
+        }),
+      };
+    }));
   };
 
   const stats = useMemo(() => {
@@ -1250,6 +1313,7 @@ export default function App() {
               </div>
             </div>
             {saveFeedback && <p className="text-xs text-zinc-500">{saveFeedback}</p>}
+            {canjeFeedback && <p className="text-xs text-zinc-500">{canjeFeedback}</p>}
 
             <Card className="p-0 overflow-x-auto">
               <table className="w-full text-left border-collapse min-w-[800px]">
@@ -1451,7 +1515,7 @@ export default function App() {
                       />
                     </div>
                     <div className="flex items-center justify-between pt-2">
-                      <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-4 flex-wrap">
                         <select
                           className="text-xs font-bold bg-white border border-zinc-200 rounded-lg px-3 py-1.5 focus:outline-none"
                           value={item.validatedStatus ?? ''}
@@ -1465,7 +1529,13 @@ export default function App() {
                         <select
                           className="text-xs font-bold bg-white border border-zinc-200 rounded-lg px-3 py-1.5 focus:outline-none"
                           value={item.adjustmentType ?? ''}
-                          onChange={(e) => saveArticlePatch(justInventoryId, item.id, { adjustmentType: e.target.value as Article['adjustmentType'] })}
+                          onChange={(e) => {
+                            const nextType = e.target.value as Article['adjustmentType'];
+                            saveArticlePatch(justInventoryId, item.id, {
+                              adjustmentType: nextType,
+                              counterpartArticleCode: nextType === 'Canje' ? (item.counterpartArticleCode ?? '') : '',
+                            });
+                          }}
                           disabled={!canValidate || item.validatedStatus !== 'SI'}
                         >
                           <option value="">Seleccionar</option>
@@ -1481,6 +1551,25 @@ export default function App() {
                             onChange={(e) => saveArticlePatch(justInventoryId, item.id, { adjustmentQuantity: Number(e.target.value) })}
                             disabled={!canValidate || item.validatedStatus !== 'SI'}
                           />
+                        )}
+                        {item.adjustmentType === 'Canje' && (
+                          <>
+                            <input
+                              type="text"
+                              className="w-40 border border-zinc-200 rounded-lg px-2 py-1.5 text-xs"
+                              placeholder="Código artículo canje"
+                              value={item.counterpartArticleCode ?? ''}
+                              onChange={(e) => saveArticlePatch(justInventoryId, item.id, { counterpartArticleCode: e.target.value })}
+                              disabled={!canValidate || item.validatedStatus !== 'SI'}
+                            />
+                            <button
+                              onClick={() => applyCanjeCounterpart(justInventoryId, item.id, item.counterpartArticleCode ?? '')}
+                              className="px-3 py-1.5 bg-white border border-zinc-200 text-zinc-700 rounded-lg text-xs font-bold hover:bg-zinc-50"
+                              disabled={!canValidate || item.validatedStatus !== 'SI'}
+                            >
+                              Aplicar Canje
+                            </button>
+                          </>
                         )}
                       </div>
                       <span className="text-xs font-semibold text-zinc-500">Dif: {item.difference ?? 0}</span>

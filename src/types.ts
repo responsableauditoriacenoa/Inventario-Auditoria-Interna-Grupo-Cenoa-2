@@ -17,6 +17,7 @@ export interface Article {
   validatedAt?: string;
   adjustmentType?: 'Ajuste' | 'Canje' | 'Sin Ajuste' | '';
   adjustmentQuantity?: number;
+  counterpartArticleCode?: string;
 }
 
 export interface Inventory {
