@@ -139,6 +139,15 @@ const StatCard = ({ title, value, icon: Icon, trend, trendValue }: { title: stri
   </Card>
 );
 
+const SaveDataButton = ({ onClick }: { onClick: () => void }) => (
+  <button
+    onClick={onClick}
+    className="px-4 py-2 bg-zinc-900 text-white rounded-lg text-xs font-bold hover:bg-zinc-800 transition-colors"
+  >
+    Guardar datos
+  </button>
+);
+
 function formatCurrency(value: number) {
   return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 2 }).format(value);
 }
@@ -375,6 +384,7 @@ export default function App() {
   const [reportInventoryId, setReportInventoryId] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
+  const [saveFeedback, setSaveFeedback] = useState('');
 
   useEffect(() => {
     try {
@@ -577,6 +587,45 @@ export default function App() {
     }
   };
 
+  const handleManualSave = () => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(inventories));
+      const now = new Date();
+      const hh = String(now.getHours()).padStart(2, '0');
+      const mm = String(now.getMinutes()).padStart(2, '0');
+      const ss = String(now.getSeconds()).padStart(2, '0');
+      setSaveFeedback(`Datos guardados (${hh}:${mm}:${ss})`);
+    } catch {
+      setSaveFeedback('No se pudo guardar los datos');
+    }
+  };
+
+  const downloadCountSheet = (inventory?: Inventory) => {
+    if (!inventory) {
+      setSaveFeedback('Selecciona un inventario para descargar la planilla');
+      return;
+    }
+
+    const rows = inventory.articles.map((item) => ({
+      Artículo: item.article,
+      Locación: item.location,
+      Descripción: item.description,
+      'Stock Sistema': item.stock,
+      'Conteo Físico': item.physicalCount ?? '',
+      Diferencia: item.difference ?? '',
+      Justificación: item.justification ?? '',
+      'Validada (SI/NO)': item.validatedStatus ?? '',
+      'Tipo Ajuste': item.adjustmentType ?? '',
+      'Cantidad Ajuste': item.adjustmentQuantity ?? '',
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Conteo');
+    XLSX.writeFile(workbook, `Planilla-Conteo-${inventory.id}.xlsx`);
+    setSaveFeedback(`Planilla descargada (${inventory.id})`);
+  };
+
   const handleLogin = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const normalizedUser = loginUserId.trim();
@@ -735,6 +784,10 @@ export default function App() {
       case 'dashboard':
         return (
           <div className="space-y-6">
+            <div className="flex items-center justify-end gap-3">
+              {saveFeedback && <span className="text-xs text-zinc-500">{saveFeedback}</span>}
+              <SaveDataButton onClick={handleManualSave} />
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               <StatCard title="Valor Total Stock" value={stats.totalValue} icon={Package} trend="up" trendValue="+12%" />
               <StatCard title="Inventarios Activos" value={stats.activeCount} icon={ClipboardCheck} />
@@ -816,10 +869,10 @@ export default function App() {
           <div className="max-w-4xl mx-auto space-y-6">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-bold text-zinc-900">Nuevo Inventario</h2>
-              <button className="text-sm text-zinc-500 hover:text-zinc-900 flex items-center gap-2">
-                <Download className="w-4 h-4" />
-                Descargar Plantilla
-              </button>
+              <div className="flex items-center gap-3">
+                {saveFeedback && <span className="text-xs text-zinc-500">{saveFeedback}</span>}
+                <SaveDataButton onClick={handleManualSave} />
+              </div>
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -957,6 +1010,13 @@ export default function App() {
                 <p className="text-xs text-zinc-500 mt-0.5">Cargar conteos y calcular diferencias contra stock sistema.</p>
               </div>
               <div className="flex items-center gap-3">
+                <button
+                  onClick={() => downloadCountSheet(auditInventory)}
+                  className="px-3 py-2 bg-white border border-zinc-200 rounded-lg text-xs font-semibold text-zinc-700 hover:bg-zinc-50 flex items-center gap-2"
+                >
+                  <Download className="w-4 h-4" />
+                  Planilla de Conteo
+                </button>
                 <select
                   value={auditInventoryId}
                   onChange={(e) => setAuditInventoryId(e.target.value)}
@@ -974,8 +1034,10 @@ export default function App() {
                     className="pl-9 pr-4 py-2 bg-white border border-zinc-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900/5 transition-all w-64"
                   />
                 </div>
+                <SaveDataButton onClick={handleManualSave} />
               </div>
             </div>
+            {saveFeedback && <p className="text-xs text-zinc-500">{saveFeedback}</p>}
 
             <Card className="p-0 overflow-x-auto">
               <table className="w-full text-left border-collapse min-w-[800px]">
@@ -1087,20 +1149,24 @@ export default function App() {
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-bold text-zinc-900">Justificación de Diferencias</h2>
-              <select
-                value={justInventoryId}
-                onChange={(e) => setJustInventoryId(e.target.value)}
-                className="px-3 py-2 bg-white border border-zinc-200 rounded-lg text-xs font-semibold"
-              >
-                {openInventories.map((inv) => (
-                  <option key={inv.id} value={inv.id}>{inv.id}</option>
-                ))}
-              </select>
-              <div className="flex items-center gap-2 px-3 py-1.5 bg-rose-50 text-rose-700 rounded-lg border border-rose-100">
-                <AlertTriangle className="w-4 h-4" />
-                <span className="text-xs font-bold">{differenceRows.length} Discrepancias</span>
+              <div className="flex items-center gap-3">
+                <select
+                  value={justInventoryId}
+                  onChange={(e) => setJustInventoryId(e.target.value)}
+                  className="px-3 py-2 bg-white border border-zinc-200 rounded-lg text-xs font-semibold"
+                >
+                  {openInventories.map((inv) => (
+                    <option key={inv.id} value={inv.id}>{inv.id}</option>
+                  ))}
+                </select>
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-rose-50 text-rose-700 rounded-lg border border-rose-100">
+                  <AlertTriangle className="w-4 h-4" />
+                  <span className="text-xs font-bold">{differenceRows.length} Discrepancias</span>
+                </div>
+                <SaveDataButton onClick={handleManualSave} />
               </div>
             </div>
+            {saveFeedback && <p className="text-xs text-zinc-500">{saveFeedback}</p>}
 
             <Card title="Resumen preliminar de diferencias" subtitle="Vista rápida para jefes de repuestos">
               <div className="grid grid-cols-1 md:grid-cols-5 gap-3 text-xs">
@@ -1235,8 +1301,10 @@ export default function App() {
                     <option key={inv.id} value={inv.id}>{inv.id}</option>
                   ))}
                 </select>
+                <SaveDataButton onClick={handleManualSave} />
               </div>
             </div>
+            {saveFeedback && <p className="text-xs text-zinc-500">{saveFeedback}</p>}
 
             {reportScope === 'closed' && (
               <Card>
