@@ -99,7 +99,7 @@ const MOCK_INVENTORIES: Inventory[] = [
   },
 ];
 
-type AppTab = 'dashboard' | 'new' | 'audit' | 'justification' | 'reports';
+type AppTab = 'dashboard' | 'dashboards' | 'new' | 'audit' | 'justification' | 'reports';
 
 const Card = ({ children, className, title, subtitle, action, ...props }: { children: React.ReactNode, className?: string, title?: string, subtitle?: string, action?: React.ReactNode } & React.HTMLAttributes<HTMLDivElement>) => (
   <div className={cn("bg-white border border-zinc-200 rounded-xl overflow-hidden shadow-sm", className)} {...props}>
@@ -456,6 +456,7 @@ export default function App() {
 
   const reportScopeInventories = reportScope === 'open' ? openInventories : filteredClosedInventories;
   const canAudit = currentUser?.role === 'Auditor' || currentUser?.role === 'admin';
+  const canViewDashboards = currentUser?.role === 'Auditor';
   const canManageInventory = canAudit;
   const canValidate = canAudit;
   const canDepositJustify = currentUser?.role === 'Deposito';
@@ -576,6 +577,41 @@ export default function App() {
       pendingJustifications,
     };
   }, [inventories, openInventories.length]);
+
+  const dashboardKpis = useMemo(() => {
+    const allArticles = inventories.flatMap((inv) => inv.articles);
+    const totalInventories = inventories.length;
+    const closedCount = closedInventories.length;
+    const closureRate = totalInventories > 0 ? (closedCount / totalInventories) * 100 : 0;
+
+    const totalStockValue = allArticles.reduce((acc, item) => acc + toNumber(item.stock) * toNumber(item.cost), 0);
+    const discrepancyValue = allArticles.reduce((acc, item) => acc + Math.abs(toNumber(item.difference)) * toNumber(item.cost), 0);
+    const discrepancyRate = totalStockValue > 0 ? (discrepancyValue / totalStockValue) * 100 : 0;
+
+    const discrepancyRows = allArticles.filter((item) => toNumber(item.difference) !== 0);
+    const validatedRows = discrepancyRows.filter((item) => item.validatedStatus === 'SI' || item.validatedStatus === 'NO');
+    const validationRate = discrepancyRows.length > 0 ? (validatedRows.length / discrepancyRows.length) * 100 : 0;
+
+    const adjustmentRows = allArticles.filter((item) => item.adjustmentType === 'Ajuste' || item.adjustmentType === 'Canje');
+    const adjustmentValue = adjustmentRows.reduce((acc, item) => acc + Math.abs(toNumber(item.adjustmentQuantity)) * toNumber(item.cost), 0);
+
+    const closedGrades = closedInventories.map((inventory) => calculateResults(inventory.articles).grado);
+    const avgGrade = closedGrades.length > 0
+      ? closedGrades.reduce((acc, grade) => acc + grade, 0) / closedGrades.length
+      : 0;
+
+    return {
+      totalInventories,
+      closedCount,
+      closureRate,
+      discrepancyRate,
+      validationRate,
+      adjustmentValue,
+      avgGrade,
+      discrepancyRows: discrepancyRows.length,
+      pendingJustifications: stats.pendingJustifications,
+    };
+  }, [closedInventories, inventories, stats.pendingJustifications]);
 
   const runAiAnalysis = async () => {
     if (!process.env.GEMINI_API_KEY) {
@@ -960,6 +996,50 @@ export default function App() {
                   </div>
                 </Card>
               </div>
+            </div>
+          </div>
+        );
+      case 'dashboards':
+        if (!canViewDashboards) {
+          return <Card><p className="text-sm text-zinc-500">Solo el perfil Auditor puede visualizar este análisis.</p></Card>;
+        }
+        return (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-zinc-900">Dashboards de Análisis</h2>
+                <p className="text-xs text-zinc-500 mt-0.5">KPIs consolidados de operación, diferencias y calidad de cierre.</p>
+              </div>
+              <SaveDataButton onClick={handleManualSave} />
+            </div>
+            {saveFeedback && <p className="text-xs text-zinc-500">{saveFeedback}</p>}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
+              <StatCard title="Inventarios Totales" value={dashboardKpis.totalInventories} icon={Package} />
+              <StatCard title="Tasa de Cierre" value={`${dashboardKpis.closureRate.toFixed(1)}%`} icon={CheckCircle2} trend="up" trendValue={`${dashboardKpis.closedCount} cerrados`} />
+              <StatCard title="Discrepancia Valorizada" value={`${dashboardKpis.discrepancyRate.toFixed(2)}%`} icon={AlertTriangle} trend="down" trendValue={`${dashboardKpis.discrepancyRows} ítems`} />
+              <StatCard title="Validación de Diferencias" value={`${dashboardKpis.validationRate.toFixed(1)}%`} icon={ClipboardCheck} trend="up" trendValue="SI/NO cargado" />
+              <StatCard title="Grado Promedio Cierre" value={`${dashboardKpis.avgGrade.toFixed(1)}%`} icon={LayoutDashboard} trend="up" trendValue="inventarios cerrados" />
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <Card title="Resumen ejecutivo" subtitle="Indicadores clave para seguimiento">
+                <div className="space-y-3 text-sm">
+                  <div className="flex items-center justify-between"><span className="text-zinc-500">Justificaciones pendientes</span><span className="font-bold text-zinc-900">{dashboardKpis.pendingJustifications}</span></div>
+                  <div className="flex items-center justify-between"><span className="text-zinc-500">Valor total de ajustes/canjes</span><span className="font-bold text-zinc-900">{formatCurrency(dashboardKpis.adjustmentValue)}</span></div>
+                  <div className="flex items-center justify-between"><span className="text-zinc-500">Inventarios cerrados</span><span className="font-bold text-zinc-900">{dashboardKpis.closedCount}</span></div>
+                  <div className="flex items-center justify-between"><span className="text-zinc-500">Inventarios abiertos</span><span className="font-bold text-zinc-900">{openInventories.length}</span></div>
+                </div>
+              </Card>
+
+              <Card title="Lectura rápida" subtitle="Interpretación operativa">
+                <div className="space-y-2 text-xs text-zinc-600 leading-relaxed">
+                  <p>- Una tasa de discrepancia menor a 1% indica buen control de stock valorizado.</p>
+                  <p>- Si la validación está debajo de 80%, priorizar revisión de justificaciones pendientes.</p>
+                  <p>- El grado promedio refleja calidad de cierre y consistencia de ajustes.</p>
+                  <p>- El valor de ajustes/canjes permite estimar impacto económico del ciclo auditado.</p>
+                </div>
+              </Card>
             </div>
           </div>
         );
@@ -1627,6 +1707,7 @@ export default function App() {
         <nav className="flex-1 px-4 space-y-1 mt-4">
           {[
             { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+            ...(canViewDashboards ? [{ id: 'dashboards', label: 'Dashboards', icon: LayoutDashboard }] : []),
             { id: 'new', label: 'Nuevo Inventario', icon: Plus },
             { id: 'audit', label: 'Conteo Físico', icon: ClipboardCheck },
             { id: 'justification', label: 'Justificaciones', icon: MessageSquareQuote },
