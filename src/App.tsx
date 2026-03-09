@@ -51,6 +51,16 @@ const C_DESC = 'Descripción';
 const C_STOCK = 'Stock';
 const C_COSTO = 'Cto.Rep.';
 
+type ImportColumnKey = 'article' | 'location' | 'description' | 'stock' | 'cost';
+
+const IMPORT_COLUMN_ALIASES: Record<ImportColumnKey, string[]> = {
+  article: [C_ART, 'Articulo', 'Cod Articulo', 'Código Artículo', 'Codigo Articulo', 'Código', 'Codigo', 'SKU', 'Item'],
+  location: [C_LOC, 'Locacion', 'Ubicación', 'Ubicacion', 'Deposito', 'Depósito', 'Almacen', 'Almacén', 'Bin', 'Rack'],
+  description: [C_DESC, 'Descripcion', 'Detalle', 'Denominación', 'Denominacion', 'Producto', 'Nombre'],
+  stock: [C_STOCK, 'Stock Sistema', 'Stock Sist', 'Existencia', 'Cant', 'Cantidad', 'QTY', 'Qty'],
+  cost: [C_COSTO, 'Costo', 'Costo Reposición', 'Costo Reposicion', 'Costo Unitario', 'P. Costo', 'Precio Costo'],
+};
+
 type SourceArticle = Omit<Article, 'id' | 'category'>;
 
 const BASE_ARTICLES: SourceArticle[] = [
@@ -165,6 +175,73 @@ function parseArNumber(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function normalizeHeader(value: unknown) {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]/g, '');
+}
+
+function matchColumnAlias(cellNormalized: string, aliases: string[]) {
+  if (!cellNormalized) {
+    return false;
+  }
+  return aliases.some((alias) => {
+    const aliasNormalized = normalizeHeader(alias);
+    if (!aliasNormalized) {
+      return false;
+    }
+    return (
+      cellNormalized === aliasNormalized
+      || cellNormalized.includes(aliasNormalized)
+      || (cellNormalized.length >= 5 && aliasNormalized.includes(cellNormalized))
+    );
+  });
+}
+
+function detectImportColumns(rows: unknown[][]) {
+  const searchLimit = Math.min(rows.length, 20);
+  let best: {
+    rowIndex: number;
+    mapping: Partial<Record<ImportColumnKey, number>>;
+    score: number;
+  } | null = null;
+
+  for (let rowIndex = 0; rowIndex < searchLimit; rowIndex += 1) {
+    const row = Array.isArray(rows[rowIndex]) ? rows[rowIndex] : [];
+    const normalizedCells = row.map((cell) => normalizeHeader(cell));
+    if (normalizedCells.every((cell) => !cell)) {
+      continue;
+    }
+
+    const mapping: Partial<Record<ImportColumnKey, number>> = {};
+    (Object.keys(IMPORT_COLUMN_ALIASES) as ImportColumnKey[]).forEach((key) => {
+      const index = normalizedCells.findIndex((cell) => matchColumnAlias(cell, IMPORT_COLUMN_ALIASES[key]));
+      if (index >= 0) {
+        mapping[key] = index;
+      }
+    });
+
+    const score = Object.keys(mapping).length;
+    if (!best || score > best.score) {
+      best = { rowIndex, mapping, score };
+    }
+
+    if (score === 5) {
+      break;
+    }
+  }
+
+  if (!best) {
+    return null;
+  }
+
+  const missing = (Object.keys(IMPORT_COLUMN_ALIASES) as ImportColumnKey[]).filter((key) => best?.mapping[key] === undefined);
+  return { ...best, missing };
+}
+
 function splitAbcCategories(baseArticles: SourceArticle[]) {
   const valued = [...baseArticles]
     .map((item) => ({ ...item, totalValue: item.stock * item.cost }))
@@ -186,7 +263,7 @@ function splitAbcCategories(baseArticles: SourceArticle[]) {
   };
 }
 
-function applyAbcSample(baseArticles: SourceArticle[]) {
+function applyAbcSample(baseArticles: SourceArticle[]): Article[] {
   const { a, b, c } = splitAbcCategories(baseArticles);
 
   return [...pickRandom(a, 80), ...pickRandom(b, 15), ...pickRandom(c, 5)].map((item, index) => ({
@@ -200,10 +277,10 @@ function applyAbcSample(baseArticles: SourceArticle[]) {
     physicalCount: undefined,
     difference: 0,
     justification: '',
-    validatedStatus: '',
+    validatedStatus: '' as Article['validatedStatus'],
     validatedBy: '',
     validatedAt: '',
-    adjustmentType: '',
+    adjustmentType: '' as Article['adjustmentType'],
     adjustmentQuantity: 0,
   }));
 }
@@ -539,28 +616,42 @@ export default function App() {
       const firstSheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[firstSheetName];
 
-      const headerRows = XLSX.utils.sheet_to_json<string[]>(worksheet, { header: 1, blankrows: false });
-      const headers = (headerRows[0] ?? []).map((h) => String(h).trim());
-      const requiredColumns = [C_ART, C_LOC, C_DESC, C_STOCK, C_COSTO];
-      const missing = requiredColumns.filter((column) => !headers.includes(column));
+      const sheetRows = XLSX.utils.sheet_to_json<unknown[]>(worksheet, { header: 1, blankrows: false, defval: '' });
+      const detected = detectImportColumns(sheetRows);
 
-      if (missing.length > 0) {
-        setImportError(`Faltan columnas obligatorias: ${missing.join(', ')}`);
+      if (!detected || detected.missing.length > 0) {
+        const missingLabels = detected?.missing.map((key) => {
+          if (key === 'article') return C_ART;
+          if (key === 'location') return C_LOC;
+          if (key === 'description') return C_DESC;
+          if (key === 'stock') return C_STOCK;
+          return C_COSTO;
+        }) ?? [C_ART, C_LOC, C_DESC, C_STOCK, C_COSTO];
+        setImportError(`No se pudieron detectar columnas obligatorias: ${missingLabels.join(', ')}`);
         setImportedRows([]);
         setImportedFileName('');
         return;
       }
 
-      const dataRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: '' });
+      const dataRows = sheetRows.slice(detected.rowIndex + 1);
       const normalized: SourceArticle[] = dataRows
+        .map((row) => {
+          const cells = Array.isArray(row) ? row : [];
+          const valueAt = (index: number | undefined) => (index === undefined ? '' : cells[index]);
+          return {
+            article: String(valueAt(detected.mapping.article) ?? '').trim(),
+            location: String(valueAt(detected.mapping.location) ?? '').trim(),
+            description: String(valueAt(detected.mapping.description) ?? '').trim(),
+            stock: parseArNumber(valueAt(detected.mapping.stock)),
+            cost: parseArNumber(valueAt(detected.mapping.cost)),
+          };
+        })
+        .filter((row) => row.article && row.location)
         .map((row) => ({
-          article: String(row[C_ART] ?? '').trim(),
-          location: String(row[C_LOC] ?? '').trim(),
-          description: String(row[C_DESC] ?? '').trim(),
-          stock: parseArNumber(row[C_STOCK]),
-          cost: parseArNumber(row[C_COSTO]),
+          ...row,
+          description: row.description || row.article,
         }))
-        .filter((row) => row.article && row.location);
+      ;
 
       if (normalized.length === 0) {
         setImportError('El archivo no contiene filas válidas para procesar.');
@@ -594,7 +685,7 @@ export default function App() {
     if (inventories.some((inv) => inv.id === id)) {
       return;
     }
-    const articles = applyAbcSample(importedRows.length > 0 ? importedRows : BASE_ARTICLES);
+    const articles = applyAbcSample(importedRows);
     const now = new Date();
     const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
     const next: Inventory = {
@@ -741,7 +832,7 @@ export default function App() {
                     </div>
                     <div>
                       <p className="text-sm font-semibold text-zinc-900">Subir Reporte de Stock (.xlsx)</p>
-                      <p className="text-xs text-zinc-500 mt-1">Columnas requeridas: Artículo, Locación, Descripción, Stock, Cto.Rep.</p>
+                      <p className="text-xs text-zinc-500 mt-1">Detección flexible de encabezados (Artículo, Locación, Descripción, Stock, Cto.Rep. y variantes).</p>
                       {importedFileName && <p className="text-xs text-emerald-700 mt-2 font-semibold">Archivo cargado: {importedFileName}</p>}
                     </div>
                   </label>
@@ -965,6 +1056,33 @@ export default function App() {
           return <Card><p className="text-sm text-zinc-500">No hay inventarios abiertos para justificar.</p></Card>;
         }
         const differenceRows = (justInventory?.articles ?? []).filter((art) => (art.difference ?? 0) !== 0);
+        const preliminarySummary = differenceRows.reduce(
+          (acc, item) => {
+            const diff = item.difference ?? 0;
+            const value = Math.abs(diff) * toNumber(item.cost);
+
+            if (diff < 0) {
+              acc.faltantesCantidad += Math.abs(diff);
+              acc.faltantesValor += value;
+            }
+            if (diff > 0) {
+              acc.sobrantesCantidad += diff;
+              acc.sobrantesValor += value;
+            }
+            if (!item.justification?.trim()) {
+              acc.pendientes += 1;
+            }
+
+            return acc;
+          },
+          {
+            faltantesCantidad: 0,
+            faltantesValor: 0,
+            sobrantesCantidad: 0,
+            sobrantesValor: 0,
+            pendientes: 0,
+          },
+        );
         return (
           <div className="space-y-6">
             <div className="flex items-center justify-between">
@@ -983,6 +1101,31 @@ export default function App() {
                 <span className="text-xs font-bold">{differenceRows.length} Discrepancias</span>
               </div>
             </div>
+
+            <Card title="Resumen preliminar de diferencias" subtitle="Vista rápida para jefes de repuestos">
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-3 text-xs">
+                <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
+                  <p className="text-zinc-500">Discrepancias</p>
+                  <p className="text-base font-bold text-zinc-900">{differenceRows.length}</p>
+                </div>
+                <div className="rounded-lg border border-rose-100 bg-rose-50 px-3 py-2">
+                  <p className="text-rose-700">Faltantes (cant.)</p>
+                  <p className="text-base font-bold text-rose-700">{preliminarySummary.faltantesCantidad}</p>
+                </div>
+                <div className="rounded-lg border border-rose-100 bg-rose-50 px-3 py-2">
+                  <p className="text-rose-700">Faltantes (valor)</p>
+                  <p className="text-base font-bold text-rose-700">{formatCurrency(preliminarySummary.faltantesValor)}</p>
+                </div>
+                <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2">
+                  <p className="text-emerald-700">Sobrantes (cant.)</p>
+                  <p className="text-base font-bold text-emerald-700">{preliminarySummary.sobrantesCantidad}</p>
+                </div>
+                <div className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2">
+                  <p className="text-amber-700">Justif. pendientes</p>
+                  <p className="text-base font-bold text-amber-700">{preliminarySummary.pendientes}</p>
+                </div>
+              </div>
+            </Card>
 
             {canDepositJustify && (
               <p className="text-xs text-zinc-500">Perfil Depósito: completá únicamente la justificación de cada diferencia.</p>
