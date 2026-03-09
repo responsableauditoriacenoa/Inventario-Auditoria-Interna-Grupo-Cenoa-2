@@ -184,6 +184,13 @@ function parseArNumber(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function cellToExportValue(value: unknown): string | number {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : 0;
+  }
+  return String(value ?? '').trim();
+}
+
 function normalizeHeader(value: unknown) {
   return String(value ?? '')
     .trim()
@@ -283,6 +290,7 @@ function applyAbcSample(baseArticles: SourceArticle[]): Article[] {
     stock: item.stock,
     cost: item.cost,
     category: item.category,
+    sourceData: item.sourceData,
     physicalCount: undefined,
     difference: 0,
     justification: '',
@@ -372,6 +380,8 @@ export default function App() {
   const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState('');
   const [importedRows, setImportedRows] = useState<SourceArticle[]>([]);
+  const [importedColumns, setImportedColumns] = useState<string[]>([]);
+  const [importedExtraColumns, setImportedExtraColumns] = useState<string[]>([]);
   const [importedFileName, setImportedFileName] = useState('');
   const [importError, setImportError] = useState('');
   const [concessionaire, setConcessionaire] = useState('Autolux');
@@ -606,24 +616,87 @@ export default function App() {
       return;
     }
 
-    const rows = inventory.articles.map((item) => ({
-      Artículo: item.article,
-      Locación: item.location,
-      Descripción: item.description,
-      'Stock Sistema': item.stock,
-      'Conteo Físico': item.physicalCount ?? '',
-      Diferencia: item.difference ?? '',
-      Justificación: item.justification ?? '',
-      'Validada (SI/NO)': item.validatedStatus ?? '',
-      'Tipo Ajuste': item.adjustmentType ?? '',
-      'Cantidad Ajuste': item.adjustmentQuantity ?? '',
-    }));
+    const sourceColumns = inventory.importColumns && inventory.importColumns.length > 0
+      ? inventory.importColumns
+      : [C_ART, C_LOC, C_DESC, C_STOCK, C_COSTO];
+
+    const rows = inventory.articles.map((item) => {
+      const sourceBlock = sourceColumns.reduce<Record<string, string | number>>((acc, column) => {
+        if (item.sourceData && column in item.sourceData) {
+          acc[column] = item.sourceData[column];
+          return acc;
+        }
+
+        if (column === C_ART) acc[column] = item.article;
+        else if (column === C_LOC) acc[column] = item.location;
+        else if (column === C_DESC) acc[column] = item.description;
+        else if (column === C_STOCK) acc[column] = item.stock;
+        else if (column === C_COSTO) acc[column] = item.cost;
+        else acc[column] = '';
+        return acc;
+      }, {});
+
+      return {
+        ...sourceBlock,
+        'Conteo Físico': item.physicalCount ?? '',
+        Diferencia: item.difference ?? '',
+        Justificación: item.justification ?? '',
+        'Validada (SI/NO)': item.validatedStatus ?? '',
+        'Tipo Ajuste': item.adjustmentType ?? '',
+        'Cantidad Ajuste': item.adjustmentQuantity ?? '',
+      };
+    });
 
     const worksheet = XLSX.utils.json_to_sheet(rows);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Conteo');
     XLSX.writeFile(workbook, `Planilla-Conteo-${inventory.id}.xlsx`);
     setSaveFeedback(`Planilla descargada (${inventory.id})`);
+  };
+
+  const downloadReportSheet = (inventory?: Inventory) => {
+    if (!inventory) {
+      setSaveFeedback('Selecciona un inventario para descargar el reporte');
+      return;
+    }
+
+    const sourceColumns = inventory.importColumns && inventory.importColumns.length > 0
+      ? inventory.importColumns
+      : [C_ART, C_LOC, C_DESC, C_STOCK, C_COSTO];
+
+    const rows = inventory.articles.map((item) => {
+      const sourceBlock = sourceColumns.reduce<Record<string, string | number>>((acc, column) => {
+        if (item.sourceData && column in item.sourceData) {
+          acc[column] = item.sourceData[column];
+          return acc;
+        }
+
+        if (column === C_ART) acc[column] = item.article;
+        else if (column === C_LOC) acc[column] = item.location;
+        else if (column === C_DESC) acc[column] = item.description;
+        else if (column === C_STOCK) acc[column] = item.stock;
+        else if (column === C_COSTO) acc[column] = item.cost;
+        else acc[column] = '';
+        return acc;
+      }, {});
+
+      return {
+        ...sourceBlock,
+        Categoría: item.category,
+        'Conteo Físico': item.physicalCount ?? '',
+        Diferencia: item.difference ?? '',
+        Justificación: item.justification ?? '',
+        'Validada (SI/NO)': item.validatedStatus ?? '',
+        'Tipo Ajuste': item.adjustmentType ?? '',
+        'Cantidad Ajuste': item.adjustmentQuantity ?? '',
+      };
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Reporte');
+    XLSX.writeFile(workbook, `Reporte-Inventario-${inventory.id}.xlsx`);
+    setSaveFeedback(`Reporte descargado (${inventory.id})`);
   };
 
   const handleLogin = (event: React.FormEvent<HTMLFormElement>) => {
@@ -678,21 +751,40 @@ export default function App() {
         }) ?? [C_ART, C_LOC, C_DESC, C_STOCK, C_COSTO];
         setImportError(`No se pudieron detectar columnas obligatorias: ${missingLabels.join(', ')}`);
         setImportedRows([]);
+        setImportedColumns([]);
+        setImportedExtraColumns([]);
         setImportedFileName('');
         return;
       }
+
+      const headerRow = Array.isArray(sheetRows[detected.rowIndex]) ? sheetRows[detected.rowIndex] : [];
+      const headerLabels = headerRow.map((cell, index) => {
+        const label = String(cell ?? '').trim();
+        return label || `Columna ${index + 1}`;
+      });
+
+      const mappedIndexes = new Set(
+        Object.values(detected.mapping).filter((index): index is number => typeof index === 'number'),
+      );
+      const extraLabels = headerLabels.filter((_, index) => !mappedIndexes.has(index));
 
       const dataRows = sheetRows.slice(detected.rowIndex + 1);
       const normalized: SourceArticle[] = dataRows
         .map((row) => {
           const cells = Array.isArray(row) ? row : [];
           const valueAt = (index: number | undefined) => (index === undefined ? '' : cells[index]);
+          const sourceData = headerLabels.reduce<Record<string, string | number>>((acc, label, index) => {
+            acc[label] = cellToExportValue(cells[index]);
+            return acc;
+          }, {});
+
           return {
             article: String(valueAt(detected.mapping.article) ?? '').trim(),
             location: String(valueAt(detected.mapping.location) ?? '').trim(),
             description: String(valueAt(detected.mapping.description) ?? '').trim(),
             stock: parseArNumber(valueAt(detected.mapping.stock)),
             cost: parseArNumber(valueAt(detected.mapping.cost)),
+            sourceData,
           };
         })
         .filter((row) => row.article && row.location)
@@ -705,16 +797,22 @@ export default function App() {
       if (normalized.length === 0) {
         setImportError('El archivo no contiene filas válidas para procesar.');
         setImportedRows([]);
+        setImportedColumns([]);
+        setImportedExtraColumns([]);
         setImportedFileName('');
         return;
       }
 
       setImportedRows(normalized);
+      setImportedColumns(headerLabels);
+      setImportedExtraColumns(extraLabels);
       setImportedFileName(file.name);
       setImportError('');
     } catch {
       setImportError('No se pudo leer el archivo Excel. Verificá formato y estructura.');
       setImportedRows([]);
+      setImportedColumns([]);
+      setImportedExtraColumns([]);
       setImportedFileName('');
     } finally {
       event.target.value = '';
@@ -745,6 +843,8 @@ export default function App() {
       auditor: currentUser.name,
       status: 'Abierto',
       articles,
+      importColumns: importedColumns,
+      extraColumns: importedExtraColumns,
       closureDate: '',
       closureUser: '',
     };
@@ -753,6 +853,8 @@ export default function App() {
     setJustInventoryId(id);
     setReportInventoryId(id);
     setImportedRows([]);
+    setImportedColumns([]);
+    setImportedExtraColumns([]);
     setImportedFileName('');
     setImportError('');
     setActiveTab('audit');
@@ -1046,6 +1148,9 @@ export default function App() {
                     <th className="px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Artículo</th>
                     <th className="px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Locación</th>
                     <th className="px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Descripción</th>
+                    {(auditInventory?.extraColumns ?? []).map((column) => (
+                      <th key={`extra-head-${column}`} className="px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">{column}</th>
+                    ))}
                     <th className="px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-wider text-right">Stock Sist.</th>
                     <th className="px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-wider text-center">Cat</th>
                     <th className="px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-wider w-32">Conteo Físico</th>
@@ -1060,6 +1165,11 @@ export default function App() {
                       </td>
                       <td className="px-6 py-4 text-sm text-zinc-500 font-mono">{art.location}</td>
                       <td className="px-6 py-4 text-sm text-zinc-500 max-w-xs truncate">{art.description}</td>
+                      {(auditInventory?.extraColumns ?? []).map((column) => (
+                        <td key={`extra-cell-${art.id}-${column}`} className="px-6 py-4 text-sm text-zinc-500">
+                          {String(art.sourceData?.[column] ?? '-')}
+                        </td>
+                      ))}
                       <td className="px-6 py-4 text-sm text-zinc-900 text-right font-mono font-medium">{art.stock}</td>
                       <td className="px-6 py-4 text-center">
                         <span className={cn(
@@ -1301,6 +1411,13 @@ export default function App() {
                     <option key={inv.id} value={inv.id}>{inv.id}</option>
                   ))}
                 </select>
+                <button
+                  onClick={() => downloadReportSheet(reportInventory)}
+                  className="px-3 py-2 bg-white border border-zinc-200 rounded-lg text-xs font-semibold text-zinc-700 hover:bg-zinc-50 flex items-center gap-2"
+                >
+                  <Download className="w-4 h-4" />
+                  Descargar Reporte
+                </button>
                 <SaveDataButton onClick={handleManualSave} />
               </div>
             </div>

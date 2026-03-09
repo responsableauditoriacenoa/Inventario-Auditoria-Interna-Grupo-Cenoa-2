@@ -8,6 +8,7 @@ export interface Article {
   stock: number;
   cost: number;
   category: Category;
+  sourceData?: Record<string, string | number>;
   physicalCount?: number;
   difference?: number;
   justification?: string;
@@ -26,6 +27,8 @@ export interface Inventory {
   auditor: string;
   status: 'Abierto' | 'Cerrado';
   articles: Article[];
+  importColumns?: string[];
+  extraColumns?: string[];
   closureDate?: string;
   closureUser?: string;
 }
