@@ -1566,7 +1566,15 @@ export default function App() {
 
             <div className="grid grid-cols-1 gap-4">
               {differenceRows.length === 0 && <Card><p className="text-sm text-emerald-700 font-medium">Sin diferencias para justificar en este inventario.</p></Card>}
-              {differenceRows.map((item) => (
+              {differenceRows.map((item) => {
+                const counterpartCode = (item.counterpartArticleCode ?? '').trim();
+                const counterpartPreview = counterpartCode
+                  ? (justInventory?.articles ?? []).find(
+                      (article) => article.id !== item.id && article.article.trim().toLowerCase() === counterpartCode.toLowerCase(),
+                    )
+                  : undefined;
+
+                return (
                 <Card key={item.id} className="flex flex-col md:flex-row gap-6 p-0 overflow-hidden">
                   <div className="w-full md:w-64 bg-zinc-50 p-6 border-r border-zinc-100">
                     <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2">Artículo</p>
@@ -1649,6 +1657,19 @@ export default function App() {
                             >
                               Aplicar Canje
                             </button>
+                            {counterpartCode && counterpartPreview && (
+                              <div className="w-full rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                                <p className="font-bold">Artículo detectado: {counterpartPreview.article}</p>
+                                <p>Descripción: {counterpartPreview.description}</p>
+                                <p>Costo reposición: {formatCurrency(counterpartPreview.cost)}</p>
+                                <p>Stock virtual: {counterpartPreview.stock}</p>
+                              </div>
+                            )}
+                            {counterpartCode && !counterpartPreview && (
+                              <div className="w-full rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                                No se encontró el código {counterpartCode} en este inventario.
+                              </div>
+                            )}
                           </>
                         )}
                       </div>
@@ -1656,7 +1677,7 @@ export default function App() {
                     </div>
                   </div>
                 </Card>
-              ))}
+              )})}
             </div>
           </div>
         );
