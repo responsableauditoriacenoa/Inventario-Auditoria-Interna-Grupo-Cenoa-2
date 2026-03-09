@@ -581,37 +581,58 @@ export default function App() {
   const dashboardKpis = useMemo(() => {
     const allArticles = inventories.flatMap((inv) => inv.articles);
     const totalInventories = inventories.length;
+    const openCount = openInventories.length;
     const closedCount = closedInventories.length;
     const closureRate = totalInventories > 0 ? (closedCount / totalInventories) * 100 : 0;
+    const totalArticles = allArticles.length;
+    const avgArticlesPerInventory = totalInventories > 0 ? totalArticles / totalInventories : 0;
 
     const totalStockValue = allArticles.reduce((acc, item) => acc + toNumber(item.stock) * toNumber(item.cost), 0);
     const discrepancyValue = allArticles.reduce((acc, item) => acc + Math.abs(toNumber(item.difference)) * toNumber(item.cost), 0);
     const discrepancyRate = totalStockValue > 0 ? (discrepancyValue / totalStockValue) * 100 : 0;
 
     const discrepancyRows = allArticles.filter((item) => toNumber(item.difference) !== 0);
+    const discrepancyIncidence = totalArticles > 0 ? (discrepancyRows.length / totalArticles) * 100 : 0;
     const validatedRows = discrepancyRows.filter((item) => item.validatedStatus === 'SI' || item.validatedStatus === 'NO');
     const validationRate = discrepancyRows.length > 0 ? (validatedRows.length / discrepancyRows.length) * 100 : 0;
+    const unresolvedRate = discrepancyRows.length > 0 ? ((stats.pendingJustifications / discrepancyRows.length) * 100) : 0;
+
+    const countedRows = allArticles.filter((item) => item.physicalCount !== undefined && item.physicalCount !== null && !Number.isNaN(item.physicalCount)).length;
+    const countCoverage = totalArticles > 0 ? (countedRows / totalArticles) * 100 : 0;
 
     const adjustmentRows = allArticles.filter((item) => item.adjustmentType === 'Ajuste' || item.adjustmentType === 'Canje');
     const adjustmentValue = adjustmentRows.reduce((acc, item) => acc + Math.abs(toNumber(item.adjustmentQuantity)) * toNumber(item.cost), 0);
+    const adjustmentRate = discrepancyValue > 0 ? (adjustmentValue / discrepancyValue) * 100 : 0;
 
     const closedGrades = closedInventories.map((inventory) => calculateResults(inventory.articles).grado);
     const avgGrade = closedGrades.length > 0
       ? closedGrades.reduce((acc, grade) => acc + grade, 0) / closedGrades.length
       : 0;
 
+    const closedStockValue = closedInventories
+      .flatMap((inventory) => inventory.articles)
+      .reduce((acc, item) => acc + toNumber(item.stock) * toNumber(item.cost), 0);
+
     return {
       totalInventories,
+      openCount,
       closedCount,
       closureRate,
+      totalArticles,
+      avgArticlesPerInventory,
       discrepancyRate,
+      discrepancyIncidence,
       validationRate,
+      unresolvedRate,
+      countCoverage,
       adjustmentValue,
+      adjustmentRate,
+      closedStockValue,
       avgGrade,
       discrepancyRows: discrepancyRows.length,
       pendingJustifications: stats.pendingJustifications,
     };
-  }, [closedInventories, inventories, stats.pendingJustifications]);
+  }, [closedInventories, inventories, openInventories.length, stats.pendingJustifications]);
 
   const runAiAnalysis = async () => {
     if (!process.env.GEMINI_API_KEY) {
@@ -1022,6 +1043,14 @@ export default function App() {
               <StatCard title="Grado Promedio Cierre" value={`${dashboardKpis.avgGrade.toFixed(1)}%`} icon={LayoutDashboard} trend="up" trendValue="inventarios cerrados" />
             </div>
 
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
+              <StatCard title="Cobertura de Conteo" value={`${dashboardKpis.countCoverage.toFixed(1)}%`} icon={ClipboardCheck} trend="up" trendValue={`${dashboardKpis.totalArticles} artículos`} />
+              <StatCard title="Incidencia de Diferencias" value={`${dashboardKpis.discrepancyIncidence.toFixed(1)}%`} icon={AlertTriangle} trend="down" trendValue={`${dashboardKpis.discrepancyRows} con desvío`} />
+              <StatCard title="Pendientes sobre Dif." value={`${dashboardKpis.unresolvedRate.toFixed(1)}%`} icon={MessageSquareQuote} trend="down" trendValue={`${dashboardKpis.pendingJustifications} pendientes`} />
+              <StatCard title="Ajustes sobre Desvío" value={`${dashboardKpis.adjustmentRate.toFixed(1)}%`} icon={FileText} trend="up" trendValue={formatCurrency(dashboardKpis.adjustmentValue)} />
+              <StatCard title="Carga Prom. por Inv." value={dashboardKpis.avgArticlesPerInventory.toFixed(1)} icon={Package} trend="up" trendValue={`${dashboardKpis.openCount} abiertos`} />
+            </div>
+
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <Card title="Resumen ejecutivo" subtitle="Indicadores clave para seguimiento">
                 <div className="space-y-3 text-sm">
@@ -1029,6 +1058,7 @@ export default function App() {
                   <div className="flex items-center justify-between"><span className="text-zinc-500">Valor total de ajustes/canjes</span><span className="font-bold text-zinc-900">{formatCurrency(dashboardKpis.adjustmentValue)}</span></div>
                   <div className="flex items-center justify-between"><span className="text-zinc-500">Inventarios cerrados</span><span className="font-bold text-zinc-900">{dashboardKpis.closedCount}</span></div>
                   <div className="flex items-center justify-between"><span className="text-zinc-500">Inventarios abiertos</span><span className="font-bold text-zinc-900">{openInventories.length}</span></div>
+                  <div className="flex items-center justify-between"><span className="text-zinc-500">Stock valorizado (cerrados)</span><span className="font-bold text-zinc-900">{formatCurrency(dashboardKpis.closedStockValue)}</span></div>
                 </div>
               </Card>
 
