@@ -26,6 +26,7 @@ export interface Inventory {
   concessionaire: string;
   branch: string;
   auditor: string;
+  inventoryType?: 'rotativo' | 'general';
   status: 'Abierto' | 'Cerrado';
   articles: Article[];
   importColumns?: string[];

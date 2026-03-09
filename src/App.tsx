@@ -88,6 +88,7 @@ const MOCK_INVENTORIES: Inventory[] = [
     concessionaire: 'Autolux',
     branch: 'Ax Jujuy',
     auditor: 'Diego Guantay',
+    inventoryType: 'rotativo',
     status: 'Abierto',
     articles: [
       { id: '1', article: 'FIL-001', location: 'EST-A1', description: 'Filtro de Aceite Hilux', stock: 50, cost: 1500, category: 'A', physicalCount: 49, difference: -1, justification: 'Faltante por entrega no registrada', validatedStatus: 'SI', adjustmentType: 'Ajuste', adjustmentQuantity: -1 },
@@ -302,6 +303,30 @@ function applyAbcSample(baseArticles: SourceArticle[]): Article[] {
   }));
 }
 
+function applyFullInventory(baseArticles: SourceArticle[]): Article[] {
+  const { a, b, c } = splitAbcCategories(baseArticles);
+  const full = [...a, ...b, ...c];
+
+  return full.map((item, index) => ({
+    id: `${Date.now()}-${index}`,
+    article: item.article,
+    location: item.location,
+    description: item.description,
+    stock: item.stock,
+    cost: item.cost,
+    category: item.category,
+    sourceData: item.sourceData,
+    physicalCount: undefined,
+    difference: 0,
+    justification: '',
+    validatedStatus: '' as Article['validatedStatus'],
+    validatedBy: '',
+    validatedAt: '',
+    adjustmentType: '' as Article['adjustmentType'],
+    adjustmentQuantity: 0,
+  }));
+}
+
 function toNumber(value: unknown) {
   const parsed = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -382,6 +407,7 @@ export default function App() {
   const [importedRows, setImportedRows] = useState<SourceArticle[]>([]);
   const [importedColumns, setImportedColumns] = useState<string[]>([]);
   const [importedExtraColumns, setImportedExtraColumns] = useState<string[]>([]);
+  const [inventoryType, setInventoryType] = useState<'rotativo' | 'general'>('rotativo');
   const [importedFileName, setImportedFileName] = useState('');
   const [importError, setImportError] = useState('');
   const [concessionaire, setConcessionaire] = useState('Autolux');
@@ -463,16 +489,28 @@ export default function App() {
   const canDepositJustify = currentUser?.role === 'Deposito';
   const importedSampleStats = useMemo(() => {
     if (importedRows.length === 0) {
-      return { a: 80, b: 15, c: 5, total: 0 };
+      return inventoryType === 'rotativo'
+        ? { a: 80, b: 15, c: 5, total: 0 }
+        : { a: 0, b: 0, c: 0, total: 0 };
     }
     const { a, b, c } = splitAbcCategories(importedRows);
+
+    if (inventoryType === 'general') {
+      return {
+        a: a.length,
+        b: b.length,
+        c: c.length,
+        total: importedRows.length,
+      };
+    }
+
     return {
       a: Math.min(80, a.length),
       b: Math.min(15, b.length),
       c: Math.min(5, c.length),
       total: importedRows.length,
     };
-  }, [importedRows]);
+  }, [importedRows, inventoryType]);
 
   useEffect(() => {
     if (!auditInventoryId && openInventories[0]) {
@@ -952,7 +990,7 @@ export default function App() {
     if (inventories.some((inv) => inv.id === id)) {
       return;
     }
-    const articles = applyAbcSample(importedRows);
+    const articles = inventoryType === 'general' ? applyFullInventory(importedRows) : applyAbcSample(importedRows);
     const now = new Date();
     const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
     const next: Inventory = {
@@ -961,6 +999,7 @@ export default function App() {
       concessionaire,
       branch,
       auditor: currentUser.name,
+      inventoryType,
       status: 'Abierto',
       articles,
       importColumns: importedColumns,
@@ -1025,6 +1064,7 @@ export default function App() {
                       <tr className="bg-zinc-50 border-b border-zinc-200">
                         <th className="px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase">ID</th>
                         <th className="px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase">Fecha</th>
+                        <th className="px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase">Tipo</th>
                         <th className="px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase">Concesionaria</th>
                         <th className="px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase">Sucursal</th>
                         <th className="px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase">Estado</th>
@@ -1035,6 +1075,7 @@ export default function App() {
                         <tr key={inv.id}>
                           <td className="px-4 py-3 text-xs font-mono text-zinc-700">{inv.id}</td>
                           <td className="px-4 py-3 text-xs text-zinc-600">{inv.date}</td>
+                          <td className="px-4 py-3 text-xs text-zinc-700 capitalize">{inv.inventoryType ?? 'rotativo'}</td>
                           <td className="px-4 py-3 text-xs text-zinc-700">{inv.concessionaire}</td>
                           <td className="px-4 py-3 text-xs text-zinc-700">{inv.branch}</td>
                           <td className="px-4 py-3">
@@ -1153,6 +1194,39 @@ export default function App() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <Card className="md:col-span-2">
                 <div className="space-y-6">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-zinc-400 uppercase">Tipo de Inventario</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        onClick={() => setInventoryType('rotativo')}
+                        className={cn(
+                          'px-3 py-2 rounded-lg border text-xs font-bold transition-colors',
+                          inventoryType === 'rotativo'
+                            ? 'bg-zinc-900 text-white border-zinc-900'
+                            : 'bg-white text-zinc-700 border-zinc-200 hover:bg-zinc-50',
+                        )}
+                      >
+                        Inventario Rotativo
+                      </button>
+                      <button
+                        onClick={() => setInventoryType('general')}
+                        className={cn(
+                          'px-3 py-2 rounded-lg border text-xs font-bold transition-colors',
+                          inventoryType === 'general'
+                            ? 'bg-zinc-900 text-white border-zinc-900'
+                            : 'bg-white text-zinc-700 border-zinc-200 hover:bg-zinc-50',
+                        )}
+                      >
+                        Inventario General
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-zinc-500">
+                      {inventoryType === 'rotativo'
+                        ? 'Rotativo: toma muestra ABC (80/15/5).'
+                        : 'General: trabaja con el 100% de los artículos importados.'}
+                    </p>
+                  </div>
+
                   <label className="border-2 border-dashed border-zinc-200 rounded-xl p-12 text-center space-y-4 hover:border-zinc-400 transition-colors cursor-pointer group block">
                     <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleExcelImport} />
                     <div className="w-12 h-12 bg-zinc-50 rounded-full flex items-center justify-center mx-auto group-hover:scale-110 transition-transform">
@@ -1232,31 +1306,37 @@ export default function App() {
 
               <Card title="Resumen ABC" className="bg-zinc-50 border-zinc-200">
                 <div className="space-y-6">
-                    <p className="text-xs text-zinc-500 leading-relaxed">El sistema aplica la regla 80/15/5 y prepara los campos de conteo, diferencia, justificación y ajuste para iniciar el flujo.</p>
+                    <p className="text-xs text-zinc-500 leading-relaxed">
+                      {inventoryType === 'rotativo'
+                        ? 'El sistema aplica la regla 80/15/5 y prepara los campos de conteo, diferencia, justificación y ajuste para iniciar el flujo.'
+                        : 'El sistema usa la totalidad de artículos importados y prepara los campos de conteo, diferencia, justificación y ajuste para iniciar el flujo.'}
+                    </p>
                   <div className="space-y-3">
                     <div className="flex items-center justify-between text-xs">
-                      <span className="text-zinc-500">Muestra Cat A (80%)</span>
+                      <span className="text-zinc-500">{inventoryType === 'rotativo' ? 'Muestra Cat A (80%)' : 'Cat A (Total)'}</span>
                       <span className="font-bold text-zinc-900">{importedSampleStats.a} items</span>
                     </div>
                     <div className="w-full bg-zinc-200 h-1.5 rounded-full overflow-hidden">
-                      <div className="bg-rose-500 h-full w-[80%]" />
+                      <div className={cn('bg-rose-500 h-full', inventoryType === 'rotativo' ? 'w-[80%]' : 'w-full')} />
                     </div>
                     <div className="flex items-center justify-between text-xs">
-                      <span className="text-zinc-500">Muestra Cat B (15%)</span>
+                      <span className="text-zinc-500">{inventoryType === 'rotativo' ? 'Muestra Cat B (15%)' : 'Cat B (Total)'}</span>
                       <span className="font-bold text-zinc-900">{importedSampleStats.b} items</span>
                     </div>
                     <div className="w-full bg-zinc-200 h-1.5 rounded-full overflow-hidden">
-                      <div className="bg-amber-500 h-full w-[15%]" />
+                      <div className={cn('bg-amber-500 h-full', inventoryType === 'rotativo' ? 'w-[15%]' : 'w-full')} />
                     </div>
                     <div className="flex items-center justify-between text-xs">
-                      <span className="text-zinc-500">Muestra Cat C (5%)</span>
+                      <span className="text-zinc-500">{inventoryType === 'rotativo' ? 'Muestra Cat C (5%)' : 'Cat C (Total)'}</span>
                       <span className="font-bold text-zinc-900">{importedSampleStats.c} items</span>
                     </div>
                     <div className="w-full bg-zinc-200 h-1.5 rounded-full overflow-hidden">
-                      <div className="bg-zinc-400 h-full w-[5%]" />
+                      <div className={cn('bg-zinc-400 h-full', inventoryType === 'rotativo' ? 'w-[5%]' : 'w-full')} />
                     </div>
                     {importedSampleStats.total > 0 && (
-                      <p className="text-[11px] text-zinc-500">Total filas importadas: {importedSampleStats.total}</p>
+                      <p className="text-[11px] text-zinc-500">
+                        {inventoryType === 'rotativo' ? 'Total filas importadas' : 'Total artículos a inventariar'}: {importedSampleStats.total}
+                      </p>
                     )}
                   </div>
                   <button
